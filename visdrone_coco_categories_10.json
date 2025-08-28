@@ -1,0 +1,52 @@
+{
+  "categories": [
+    {
+      "id": 0,
+      "name": "ignored"
+    },
+    {
+      "id": 1,
+      "name": "pedestrian"
+    },
+    {
+      "id": 2,
+      "name": "people"
+    },
+    {
+      "id": 3,
+      "name": "bicycle"
+    },
+    {
+      "id": 4,
+      "name": "car"
+    },
+    {
+      "id": 5,
+      "name": "van"
+    },
+    {
+      "id": 6,
+      "name": "truck"
+    },
+    {
+      "id": 7,
+      "name": "tricycle"
+    },
+    {
+      "id": 8,
+      "name": "awning-tricycle"
+    },
+    {
+      "id": 9,
+      "name": "bus"
+    },
+    {
+      "id": 10,
+      "name": "motor"
+    },
+    {
+      "id": 11,
+      "name": "others"
+    }
+  ]
+}
