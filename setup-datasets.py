@@ -11,8 +11,8 @@ def main():
     repo = Path(__file__).resolve().parent
 
     # Optional download steps (uncomment if you use them)
-    # run(["python3", str(repo / "downloadVisdrone.py"), "--root", "datasets/visdrone"])
-    # run(["python3", str(repo / "downloadUavdt.py"), "--root", "datasets/uavdt"])
+    run(["python3", str(repo / "downloadVisdrone.py"), "--root", "datasets/visdrone"])
+    run(["python3", str(repo / "downloadUavdt.py"), "--root", "datasets/uavdt"])
     
     # --- VisDrone: generate structure ---
     run([
@@ -37,7 +37,7 @@ def main():
     # If you saved the script under a different name (e.g., finaliseDatasets.py),
     # update the filename below accordingly.
     run([
-    "python3", str(repo / "buildImageNetVid.py"),
+    "python3", str(repo / "buildImageNtVid.py"),
     "--dataset", "visdrone",
     "--root", "datasets/visdrone",
     "--copy",
