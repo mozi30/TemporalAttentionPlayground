@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 datasetTypes = ['visdrone', 'uavdt']
 visdrone_split_names = ['VisDrone2019-VID-train','VisDrone2019-VID-val','VisDrone2019-VID-test-dev']
-uavdt_split_names = ['UAVDT-train', 'UAVDT-val']
+uavdt_split_names = ['UAVDT-train', 'UAVDT-val', 'UAVDT-test']
 
 batch_size = 100
 
@@ -135,7 +135,7 @@ def createDatasetSplitDirectory(folder_root, folder_name, split_name, dataset_ty
     if 'train' in split_name.lower():
         splitFolder = 'train'
     elif 'val' in split_name.lower():
-        splitFolder = 'val'
+        splitFolder = 'valid'
     elif 'test' in split_name.lower():
         splitFolder = 'test'
     else:

@@ -57,17 +57,20 @@ if not dst_gt.exists():
 
     print("[done] Extracted to", ROOT)
 
-# ==================== NEW: 20%/80% SPLIT ====================
+# ==================== NEW: 60%/20%/20% SPLIT ====================
 
 VAL_DIR = ROOT / "UAVDT-val"
 TRAIN_DIR = ROOT / "UAVDT-train"
+TEST_DIR = ROOT / "UAVDT-test"
 
 VAL_SEQ = VAL_DIR / "sequences"
 VAL_ANN = VAL_DIR / "annotations"
 TRAIN_SEQ = TRAIN_DIR / "sequences"
 TRAIN_ANN = TRAIN_DIR / "annotations"
+TEST_SEQ = TEST_DIR / "sequences"
+TEST_ANN = TEST_DIR / "annotations"
 
-for d in [VAL_SEQ, VAL_ANN, TRAIN_SEQ, TRAIN_ANN]:
+for d in [VAL_SEQ, VAL_ANN, TRAIN_SEQ, TRAIN_ANN, TEST_SEQ, TEST_ANN]:
     d.mkdir(parents=True, exist_ok=True)
 
 # possible image roots
@@ -144,8 +147,12 @@ pairs.sort(key=lambda x: x[0])
 
 n = len(pairs)
 k_val = max(1, round(0.2 * n))
+k_test = max(1, round(0.2 * n))
+k_train = n - k_val - k_test
+
 val_pairs = pairs[:k_val]
-train_pairs = pairs[k_val:]
+test_pairs = pairs[k_val:k_val + k_test]
+train_pairs = pairs[k_val + k_test:]
 
 def move_seq_and_gt(seq: str, gt_path: pathlib.Path, seq_dir: pathlib.Path,
                     dest_seq: pathlib.Path, dest_ann: pathlib.Path,
@@ -164,10 +171,13 @@ def move_seq_and_gt(seq: str, gt_path: pathlib.Path, seq_dir: pathlib.Path,
     if not dst_gt_file.exists():
         shutil.move(str(gt_path), str(dst_gt_file))
 
-print(f"Splitting {n} sequences → {k_val} val / {n-k_val} train")
+print(f"Splitting {n} sequences → {k_val} val / {k_test} test / {k_train} train")
 
 for seq, gt, seq_dir in val_pairs:
     move_seq_and_gt(seq, gt, seq_dir, VAL_SEQ, VAL_ANN, pad_digits=7)
+
+for seq, gt, seq_dir in test_pairs:
+    move_seq_and_gt(seq, gt, seq_dir, TEST_SEQ, TEST_ANN, pad_digits=7)
 
 for seq, gt, seq_dir in train_pairs:
     move_seq_and_gt(seq, gt, seq_dir, TRAIN_SEQ, TRAIN_ANN, pad_digits=7)
@@ -194,4 +204,4 @@ try:
 except Exception:
     print("Warning: failed to remove folders.")
 
-print(f"[done] Final structure:\n- {VAL_DIR}\n- {TRAIN_DIR}")
+print(f"[done] Final structure:\n- {VAL_DIR}\n- {TEST_DIR}\n- {TRAIN_DIR}")
