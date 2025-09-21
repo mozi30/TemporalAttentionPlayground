@@ -34,6 +34,12 @@ uavdt_categories = [
     {"id": 2, "name": "bus","supercategory": "vehicle"},
 ]
 
+#{"file_name": "VID/train/ILSVRC2015_VID_train_0000/ILSVRC2015_train_00025014/000004.JPEG",
+#  "height": 720, "width": 1280, "id": 56595, "frame_id": 4, "video_id": 200, "is_vid_train_frame": true}
+
+#{"id": 44614, "video_id": -1, "image_id": 35357, "category_id": 22, "instance_id": -1,
+#  "bbox": [61, 50, 237, 243], "area": 57591, "iscrowd": false, "occluded": -1, "generated": -1}
+
 @dataclass
 class ImageEntry:
     original_file_name: str
@@ -48,7 +54,13 @@ class DatasetType(enum.Enum):
     VISDRONE = "visdrone"
     UAVDT = "uavdt"
 
+class ModelType(enum.Enum):
+    RFDETR = "rfdetr"
+    TRANSVOD = "transvod"
+
 DATASETTYPE = DatasetType.VISDRONE
+MODELTYPE = ModelType.RFDETR
+
 
 def insertNewAnnotationEntry(annotation_data, src_ann, image_name_dict, annotation_id):
     if src_ann.endswith('.txt'):
@@ -103,14 +115,39 @@ def insertNewAnnotationEntry(annotation_data, src_ann, image_name_dict, annotati
                         print(f"Warning: No image entry found for frame ID {frame_id} in annotation file '{src_ann}'.")
                         continue
                     
-                    annotation_entry = {
-                        "id": annotation_id,
-                        "image_id": image_entry.id,
-                        "category_id": category_id,
-                        "bbox": [x_top_left, y_top_left, width, height],
-                        "area": width * height,
-                        "iscrowd": 0
-                    }
+                    # Create annotation entry with model-specific fields
+                    if MODELTYPE == ModelType.RFDETR:
+                        annotation_entry = {
+                            "id": annotation_id,
+                            "image_id": image_entry.id,
+                            "category_id": category_id,
+                            "bbox": [x_top_left, y_top_left, width, height],
+                            "area": width * height,
+                            "iscrowd": 0
+                        }
+                    elif MODELTYPE == ModelType.TRANSVOD:
+                        # Extract video ID from image entry
+                        video_name_base = image_entry.video_name.replace('.txt', '')
+                        if 'uav' in video_name_base.lower():
+                            video_id = int(video_name_base.replace('uav', '').replace('_', ''))
+                        else:
+                            import re
+                            numbers = re.findall(r'\d+', video_name_base)
+                            video_id = int(numbers[-1]) if numbers else 0
+                        
+                        annotation_entry = {
+                            "id": annotation_id,
+                            "image_id": image_entry.id,
+                            "category_id": category_id,
+                            "bbox": [x_top_left, y_top_left, width, height],
+                            "area": width * height,
+                            "iscrowd": False,         # Boolean for TransVOD
+                            "video_id": video_id,
+                            "instance_id": track_id,  # Use track_id as instance_id for object tracking
+                            "occluded": -1,           # Default values as in ImageNet VID
+                            "generated": -1
+                        }
+                    
                     annotation_id += 1
                     annotation_data.append(annotation_entry)
                 return annotation_id
@@ -118,14 +155,38 @@ def insertNewAnnotationEntry(annotation_data, src_ann, image_name_dict, annotati
         except Exception as e:
             print(f"Error reading annotation file '{src_ann}': {e}")
 
-def insertPictureInAnnotationFile(batch_images, imgEntry):
-    img_dict = {
-        "file_name": imgEntry.new_file_name,
-        "height": imgEntry.height,
-        "width": imgEntry.width,
-        "id": imgEntry.id,
-        "video_name": imgEntry.video_name
-    }
+def insertPictureInAnnotationFile(batch_images, imgEntry, split_folder=None):
+    if MODELTYPE == ModelType.RFDETR:
+        img_dict = {
+            "file_name": imgEntry.new_file_name,
+            "height": imgEntry.height,
+            "width": imgEntry.width,
+            "id": imgEntry.id,
+            "video_name": imgEntry.video_name
+        }
+    elif MODELTYPE == ModelType.TRANSVOD:
+        # Extract video number from video_name (e.g., "uav0000013.txt" -> 13)
+        video_name_base = imgEntry.video_name.replace('.txt', '')
+        if 'uav' in video_name_base.lower():
+            video_id = int(video_name_base.replace('uav', '').replace('_', ''))
+        else:
+            # For other formats, try to extract number
+            import re
+            numbers = re.findall(r'\d+', video_name_base)
+            video_id = int(numbers[-1]) if numbers else 0
+        
+        frame_id = int(imgEntry.original_file_name.split('.')[0])
+        is_train_frame = split_folder == 'train' if split_folder else True
+        
+        img_dict = {
+            "file_name": imgEntry.new_file_name,  # Just the filename, since images are in Data/VID/train etc.
+            "height": imgEntry.height,
+            "width": imgEntry.width,
+            "id": imgEntry.id,
+            "frame_id": frame_id,
+            "video_id": video_id,
+            "is_vid_train_frame": is_train_frame
+        }
     
     batch_images.append(img_dict)
     return
@@ -137,23 +198,51 @@ def createDatasetSplitDirectory(folder_root, folder_name, split_name, dataset_ty
     if 'train' in split_name.lower():
         splitFolder = 'train'
     elif 'val' in split_name.lower():
-        splitFolder = 'valid'
+        if MODELTYPE == ModelType.RFDETR:
+            splitFolder = 'valid'
+        elif MODELTYPE == ModelType.TRANSVOD:
+            splitFolder = 'val'
     elif 'test' in split_name.lower():
         splitFolder = 'test'
     else:
         print(f"Error: Unknown split type in '{split_name}'.")
         return
 
-    split_dir = os.path.join(folder_root + folder_name, splitFolder)
-    try:
-        os.makedirs(split_dir, exist_ok=True)
-        print(f"Created split directory: {split_dir}")
-    except Exception as e:
-        print(f"Error creating split directory '{split_dir}': {e}")
-        return
-    
-    # Set annotation file paths
-    annotation_dst = os.path.join(split_dir, '_annotations.coco.json')
+    # Create TransVOD-specific directory structure
+    if MODELTYPE == ModelType.TRANSVOD:
+        # Create Data/VID structure for TransVOD
+        data_vid_dir = os.path.join(folder_root + folder_name, "Data", "VID", splitFolder)
+        annotations_dir = os.path.join(folder_root + folder_name, "annotations")
+        
+        try:
+            os.makedirs(data_vid_dir, exist_ok=True)
+            os.makedirs(annotations_dir, exist_ok=True)
+            print(f"Created TransVOD directory structure: {data_vid_dir}")
+            print(f"Created annotations directory: {annotations_dir}")
+        except Exception as e:
+            print(f"Error creating TransVOD directories: {e}")
+            return
+        
+        split_dir = data_vid_dir
+        
+        # Set proper annotation file names for TransVOD
+        if splitFolder == 'train':
+            annotation_dst = os.path.join(annotations_dir, 'imagenet_vid_train.json')
+        elif splitFolder == 'val':
+            annotation_dst = os.path.join(annotations_dir, 'imagenet_vid_val.json')
+        elif splitFolder == 'test':
+            annotation_dst = os.path.join(annotations_dir, 'imagenet_vid_test.json')
+    else:
+        # RFDETR structure
+        split_dir = os.path.join(folder_root + folder_name, splitFolder)
+        try:
+            os.makedirs(split_dir, exist_ok=True)
+            print(f"Created split directory: {split_dir}")
+        except Exception as e:
+            print(f"Error creating split directory '{split_dir}': {e}")
+            return
+        
+        annotation_dst = os.path.join(split_dir, '_annotations.coco.json')
 
     # Always create a new empty annotation file
     empty_annotation = {"images": [], "annotations": [], "categories": []}
@@ -165,8 +254,14 @@ def createDatasetSplitDirectory(folder_root, folder_name, split_name, dataset_ty
     else:
         print(f"Error: Unknown dataset type in folder name '{dataset_type}'.")
         return
+        
     if categories:
         empty_annotation['categories'] = categories
+        
+    # Add videos section for TransVOD
+    if MODELTYPE == ModelType.TRANSVOD:
+        empty_annotation['videos'] = []
+        
     try:
         with open(annotation_dst, 'w') as f:
             json.dump(empty_annotation, f, indent=2)
@@ -190,6 +285,7 @@ def createDatasetSplitDirectory(folder_root, folder_name, split_name, dataset_ty
     batch_images = []
     batch_annotations = []
     annotation_count = 0
+    video_dict = {}  # Track videos for TransVOD
 
     image_name_dict = {}
 
@@ -199,6 +295,23 @@ def createDatasetSplitDirectory(folder_root, folder_name, split_name, dataset_ty
         # Ensure it's a directory
         if os.path.isdir(seq_path):
             print(f"Processing sequence: {seq}")
+            
+            # Add video entry for TransVOD
+            if MODELTYPE == ModelType.TRANSVOD:
+                video_name_base = seq.replace('.txt', '') if seq.endswith('.txt') else seq
+                if 'uav' in video_name_base.lower():
+                    video_id = int(video_name_base.replace('uav', '').replace('_', ''))
+                else:
+                    import re
+                    numbers = re.findall(r'\d+', video_name_base)
+                    video_id = int(numbers[-1]) if numbers else len(video_dict)
+                
+                if video_id not in video_dict:
+                    video_dict[video_id] = {
+                        "id": video_id,
+                        "name": seq
+                    }
+            
             # Process each image in the sequence directory
             for img in os.listdir(seq_path):
                 if img.endswith('.jpg') or img.endswith('.png'):
@@ -226,14 +339,18 @@ def createDatasetSplitDirectory(folder_root, folder_name, split_name, dataset_ty
                     fileEnumator += 1
 
                     # Insert picture entry to annotation file
-                    insertPictureInAnnotationFile(batch_images, imgEntry)
+                    insertPictureInAnnotationFile(batch_images, imgEntry, splitFolder)
 
                     dst_img_path = os.path.join(dst, new_img_name)
                     src_img_path = os.path.join(seq_path, img)
                     try:
-                        shutil.copy2(src_img_path, dst_img_path)
+                        os.link(src_img_path, dst_img_path)
                     except Exception as e:
-                        print(f"Error copying image '{src_img_path}' to '{dst_img_path}': {e}")
+                        print(f"Hard link failed, falling back to copy: {e}")
+                        try:
+                            shutil.copy2(src_img_path, dst_img_path)
+                        except Exception as copy_e:
+                            print(f"Error copying image '{src_img_path}' to '{dst_img_path}': {copy_e}")
 
             # Insert annotation entries for picture to annotation file
             annotation_count = insertNewAnnotationEntry(batch_annotations, os.path.join(src_annotation_file_path, seq + ".txt"), image_name_dict, annotation_count)
@@ -247,6 +364,11 @@ def createDatasetSplitDirectory(folder_root, folder_name, split_name, dataset_ty
             data = json.load(f)
         data['images'].extend(batch_images)
         data['annotations'].extend(batch_annotations)
+        
+        # Add videos for TransVOD
+        if MODELTYPE == ModelType.TRANSVOD:
+            data['videos'] = list(video_dict.values())
+            
         with open(annotation_dst, 'w') as f:
             json.dump(data, f, indent=2)
     except Exception as e:
@@ -255,14 +377,15 @@ def createDatasetSplitDirectory(folder_root, folder_name, split_name, dataset_ty
 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
+
+    ap.add_argument('--model', type=str, required=True, choices=['rfdetr', 'transvod'], help='Model type: rfdetr or transvod')
     ap.add_argument('--dataset_type', type=str, required=True, choices=datasetTypes, help='Type of dataset. Currently only supports visdrone and uavdt')
     ap.add_argument('--data_root', type=str, required=True, help='Root folder where the datasets are stored')
+
     args = ap.parse_args()
     chosenDataSet = args.dataset_type
     data_root = args.data_root
-
-    print(f"Dataset type: {chosenDataSet}")
-    print(f"Data root: {data_root}")
+    model_type = args.model
 
     if chosenDataSet == 'visdrone':
         split_names = visdrone_split_names
@@ -274,18 +397,32 @@ if __name__ == '__main__':
         print(f"Error: Unknown dataset type '{chosenDataSet}'.")
         sys.exit(1)
 
+    if model_type == 'rfdetr':
+        MODELTYPE = ModelType.RFDETR
+        model_dir_name = "RF_DETR_COCO"
+    elif model_type == 'transvod':
+        MODELTYPE = ModelType.TRANSVOD
+        model_dir_name = "TRANSVOD_VID"  # Will create datasets/uavdt/TRANSVOD_VID
+    else:
+        print(f"Error: Unknown model type '{model_type}'.")
+        sys.exit(1)
+
+    print(f"Dataset type: {chosenDataSet}")
+    print(f"Data root: {data_root}")
+    print(f"Model type: {model_type}")
+    print(f"Model directory name: {model_dir_name}")
     print(f"Using split names: {split_names}")
 
-    rf_detr_dir = os.path.join(data_root, "RF_DETR_COCO")
+    rf_detr_dir = os.path.join(data_root, model_dir_name)
     if not os.path.exists(rf_detr_dir):
         try:
             os.makedirs(rf_detr_dir)
-            print(f"Created RF_DETR directory: {rf_detr_dir}")
+            print(f"Created {model_dir_name} directory: {rf_detr_dir}")
         except Exception as e:
-            print(f"Error creating RF_DETR directory '{rf_detr_dir}': {e}")
+            print(f"Error creating {model_dir_name} directory '{rf_detr_dir}': {e}")
             sys.exit(1)
         for split_name in split_names:
-            createDatasetSplitDirectory(data_root, "RF_DETR_COCO", split_name, chosenDataSet)
+            createDatasetSplitDirectory(data_root, model_dir_name, split_name, chosenDataSet)
     else:
-        print(f"RF_DETR directory already exists: {rf_detr_dir}")
+        print(f"{model_dir_name} directory already exists: {rf_detr_dir}")
         sys.exit(1)
