@@ -15,23 +15,23 @@ uavdt_split_names = ['UAVDT-train', 'UAVDT-val', 'UAVDT-test']
 batch_size = 100
 
 visdrone_categories = [
-    {"id": 1, "name": "pedestrian","supercategory": "person"},
-    {"id": 2, "name": "people","supercategory": "person"},
-    {"id": 3, "name": "bicycle","supercategory": "vehicle"},
-    {"id": 4, "name": "car","supercategory": "vehicle"},
-    {"id": 5, "name": "van","supercategory": "vehicle"},
-    {"id": 6, "name": "truck","supercategory": "vehicle"},
-    {"id": 7, "name": "tricycle","supercategory": "vehicle"},
-    {"id": 8, "name": "awning-tricycle","supercategory": "vehicle"},
-    {"id": 9, "name": "bus","supercategory": "vehicle"},
-    {"id": 10, "name": "motor","supercategory": "vehicle"},
-    {"id": 11, "name": "others","supercategory": "unknown"},
+    {"id": 0, "name": "pedestrian","supercategory": "person"},
+    {"id": 1, "name": "people","supercategory": "person"},
+    {"id": 2, "name": "bicycle","supercategory": "vehicle"},
+    {"id": 3, "name": "car","supercategory": "vehicle"},
+    {"id": 4, "name": "van","supercategory": "vehicle"},
+    {"id": 5, "name": "truck","supercategory": "vehicle"},
+    {"id": 6, "name": "tricycle","supercategory": "vehicle"},
+    {"id": 7, "name": "awning-tricycle","supercategory": "vehicle"},
+    {"id": 8, "name": "bus","supercategory": "vehicle"},
+    {"id": 9, "name": "motor","supercategory": "vehicle"},
+    {"id": 10, "name": "others","supercategory": "unknown"},
 ]
 
 uavdt_categories = [
-    {"id": 1, "name": "car","supercategory": "vehicle"},
-    {"id": 2, "name": "truck","supercategory": "vehicle"},
-    {"id": 3, "name": "bus","supercategory": "vehicle"},
+    {"id": 0, "name": "car","supercategory": "vehicle"},
+    {"id": 1, "name": "truck","supercategory": "vehicle"},
+    {"id": 2, "name": "bus","supercategory": "vehicle"},
 ]
 
 @dataclass
@@ -77,6 +77,7 @@ def insertNewAnnotationEntry(annotation_data, src_ann, image_name_dict, annotati
                         occlusion = int(parts[9])
                         if(category_id < 1 or category_id > 11):
                             continue
+                        category_id -= 1  # Convert from 1-based to 0-based indexing
                     elif DATASETTYPE == DatasetType.UAVDT:
                         if len(parts) != 9:
                             print("Error: UAVDT Annotation line does not contain 10 parts.")
@@ -92,6 +93,7 @@ def insertNewAnnotationEntry(annotation_data, src_ann, image_name_dict, annotati
                         truncation = int(parts[8])  # truncation
                         if category_id < 1 or category_id > 3:
                             continue
+                        category_id -= 1  # Convert from 1-based to 0-based indexing
                     else:
                         print(f"Error: Unknown DATASETTYPE '{DATASETTYPE}'.")
                         return annotation_id
