@@ -4,6 +4,135 @@ from fileinput import filename
 import os
 import shutil
 import json
+
+def generate_motion_mask(img1_path, img2_path, output_path):
+    """Generate motion mask between two consecutive frames"""
+    import cv2
+    
+    # Read images
+    img1 = cv2.imread(img1_path, cv2.IMREAD_GRAYSCALE)
+    img2 = cv2.imread(img2_path, cv2.IMREAD_GRAYSCALE)
+    
+    if img1 is None or img2 is None:
+        print(f"Warning: Could not read images {img1_path} or {img2_path}")
+        return False
+    
+    # Resize images if they don't match
+    if img1.shape != img2.shape:
+        img2 = cv2.resize(img2, (img1.shape[1], img1.shape[0]))
+    
+    # Calculate absolute difference
+    diff = cv2.absdiff(img1, img2)
+    
+    # Apply Gaussian blur to reduce noise
+    diff_blur = cv2.GaussianBlur(diff, (5, 5), 0)
+    
+    # Threshold to create binary mask
+    _, motion_mask = cv2.threshold(diff_blur, 30, 255, cv2.THRESH_BINARY)
+    
+    # Apply morphological operations to clean up the mask
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    motion_mask = cv2.morphologyEx(motion_mask, cv2.MORPH_CLOSE, kernel)
+    motion_mask = cv2.morphologyEx(motion_mask, cv2.MORPH_OPEN, kernel)
+    
+    # Convert back to 3-channel for consistency
+    motion_mask_color = cv2.cvtColor(motion_mask, cv2.COLOR_GRAY2BGR)
+    
+    # Save the motion mask
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    cv2.imwrite(output_path, motion_mask_color)
+    
+    return True
+
+def create_yolomg_annotations(annotation_file_path, image_name_dict, seq_name, split_folder, base_output_dir):
+    """Create YOLO format annotations and motion masks for YOLOMG"""
+    if not os.path.exists(annotation_file_path):
+        print(f"Warning: Annotation file not found: {annotation_file_path}")
+        return
+    
+    # Parse the annotation file
+    frame_annotations = {}
+    with open(annotation_file_path, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            
+            parts = line.split(',')
+            if len(parts) < 8:
+                continue
+            
+            frame_id = int(parts[0])
+            object_id = parts[1]
+            bbox_left = float(parts[2])
+            bbox_top = float(parts[3])
+            bbox_width = float(parts[4])
+            bbox_height = float(parts[5])
+            confidence = float(parts[6])
+            object_category = parts[7]
+            
+            if frame_id not in frame_annotations:
+                frame_annotations[frame_id] = []
+            
+            annotation = {
+                "category_id": int(object_category) - 1,  # Convert to 0-based indexing
+                "bbox": [float(bbox_left), float(bbox_top), float(bbox_width), float(bbox_height)]
+            }
+            frame_annotations[frame_id].append(annotation)
+    
+    # Create YOLO annotations and motion masks for each frame
+    sorted_frame_ids = sorted(frame_annotations.keys())
+    
+    for i, frame_id in enumerate(sorted_frame_ids):
+        if frame_id in image_name_dict:
+            img_entry = image_name_dict[frame_id]
+            annotations = frame_annotations[frame_id]
+            
+            # Create YOLO format annotation
+            yolo_content = create_yolo_annotation(img_entry, annotations, img_entry.width, img_entry.height)
+            
+            # Determine annotation file path
+            label_filename = img_entry.new_file_name.replace('.jpg', '.txt').replace('.JPEG', '.txt')
+            labels_dir = os.path.join(base_output_dir, "labels")
+            os.makedirs(labels_dir, exist_ok=True)
+            label_path = os.path.join(labels_dir, label_filename)
+            
+            # Write YOLO annotation file
+            with open(label_path, 'w') as f:
+                f.write(yolo_content)
+            
+            # Generate motion mask (if not the first frame)
+            if i > 0:
+                prev_frame_id = sorted_frame_ids[i-1]
+                if prev_frame_id in image_name_dict:
+                    prev_img_entry = image_name_dict[prev_frame_id]
+                    
+                    # Paths to current and previous images
+                    curr_img_path = os.path.join(base_output_dir, "images", img_entry.new_file_name)
+                    prev_img_path = os.path.join(base_output_dir, "images", prev_img_entry.new_file_name)
+                    
+                    # Motion mask output path
+                    mask_filename = img_entry.new_file_name
+                    mask_dir = os.path.join(base_output_dir, "masks")
+                    mask_path = os.path.join(mask_dir, mask_filename)
+                    
+                    # Generate motion mask
+                    if os.path.exists(curr_img_path) and os.path.exists(prev_img_path):
+                        generate_motion_mask(prev_img_path, curr_img_path, mask_path)
+            else:
+                # For the first frame, create an empty mask
+                img_path = os.path.join(base_output_dir, "images", img_entry.new_file_name)
+                if os.path.exists(img_path):
+                    import cv2
+                    img = cv2.imread(img_path)
+                    if img is not None:
+                        empty_mask = np.zeros_like(img)
+                        mask_filename = img_entry.new_file_name
+                        mask_dir = os.path.join(base_output_dir, "masks")
+                        os.makedirs(mask_dir, exist_ok=True)
+                        mask_path = os.path.join(mask_dir, mask_filename)
+                        cv2.imwrite(mask_path, empty_mask)
+
 import sys
 import numpy as np
 import xml.etree.ElementTree as ET
@@ -52,6 +181,71 @@ vid_to_imagenet_codes = {
 
 vid_class_names = ["airplane", "antelope", "bear", "bicycle", "bird", "bus", "car", "cattle", "dog", "domestic_cat", "elephant", "fox", "giant_panda", "hamster", "horse", "lion", "lizard", "monkey", "motorcycle", "rabbit", "red_panda", "sheep", "snake", "squirrel", "tiger", "train", "turtle", "watercraft", "whale", "zebra"]
 
+def create_yolo_annotation(img_entry, annotations, img_width, img_height):
+    """Create YOLO format annotation (.txt file) for YOLOMG"""
+    lines = []
+    
+    # UAVDT class mapping for YOLOMG (only 3 classes)
+    # UAVDT classes: 1=car, 2=truck, 3=bus, 4=van/other -> map to 0=car, 1=truck, 2=bus
+    uavdt_class_mapping = {
+        0: 0,  # car -> car (class 0)
+        1: 1,  # truck -> truck (class 1) 
+        2: 2,  # bus -> bus (class 2)
+        3: 1   # van/other -> truck (class 1) - merge with trucks
+    }
+    
+    for ann in annotations:
+        # For UAVDT+YOLOMG, use direct class mapping without VID conversion
+        if DATASETTYPE == DatasetType.UAVDT:
+            category_id = ann["category_id"]  # This is already 0-based from the parsing
+            if category_id in uavdt_class_mapping:
+                class_id = uavdt_class_mapping[category_id]
+            else:
+                print(f"Warning: Unknown UAVDT class ID {category_id}, skipping annotation")
+                continue
+        else:
+            # For other datasets, use the VID mapping approach
+            category_name = get_category_name(ann["category_id"])
+            vid_class_name = map_to_vid_class(category_name)
+            
+            uavdt_to_yolo_mapping = {
+                "car": 0,
+                "truck": 1, 
+                "bus": 2
+            }
+            
+            if vid_class_name in uavdt_to_yolo_mapping:
+                class_id = uavdt_to_yolo_mapping[vid_class_name]
+            else:
+                print(f"Warning: Unknown class {vid_class_name}, skipping annotation")
+                continue  # Skip unknown classes
+        
+        # Convert COCO bbox [x, y, width, height] to YOLO format [x_center, y_center, width, height] (normalized)
+        bbox = ann["bbox"]
+        x_left, y_top, bbox_width, bbox_height = bbox
+        
+        # Calculate center coordinates
+        x_center = x_left + bbox_width / 2.0
+        y_center = y_top + bbox_height / 2.0
+        
+        # Normalize to 0-1 range
+        x_center_norm = x_center / img_width
+        y_center_norm = y_center / img_height
+        width_norm = bbox_width / img_width
+        height_norm = bbox_height / img_height
+        
+        # Ensure values are within [0, 1] range
+        x_center_norm = max(0, min(1, x_center_norm))
+        y_center_norm = max(0, min(1, y_center_norm))
+        width_norm = max(0, min(1, width_norm))
+        height_norm = max(0, min(1, height_norm))
+        
+        # YOLO format: class_id x_center y_center width height
+        line = f"{class_id} {x_center_norm:.6f} {y_center_norm:.6f} {width_norm:.6f} {height_norm:.6f}"
+        lines.append(line)
+    
+    return "\n".join(lines)
+
 # Mapping from dataset categories to VID classes
 visdrone_to_vid_mapping = {
     "pedestrian": "rabbit",  # map pedestrian to closest VID class
@@ -97,6 +291,7 @@ class ModelType(enum.Enum):
     RFDETR = "rfdetr"
     TRANSVOD = "transvod"
     YOLOV = "yolov"
+    YOLOMG = "yolomg"
 
 DATASETTYPE = DatasetType.VISDRONE
 MODELTYPE = ModelType.RFDETR
@@ -390,6 +585,10 @@ def insertNewAnnotationEntry(annotation_data, src_ann, image_name_dict, annotati
             print(f"Error reading annotation file '{src_ann}': {e}")
 
 def insertPictureInAnnotationFile(batch_images, imgEntry, split_folder=None):
+    # YOLOV and YOLOMG don't use batch_images - they create their own annotation formats
+    if MODELTYPE == ModelType.YOLOV or MODELTYPE == ModelType.YOLOMG:
+        return
+        
     if MODELTYPE == ModelType.RFDETR:
         img_dict = {
             "file_name": imgEntry.new_file_name,
@@ -438,6 +637,8 @@ def createDatasetSplitDirectory(folder_root, folder_name, split_name, dataset_ty
             splitFolder = 'val'
         elif MODELTYPE == ModelType.YOLOV:
             splitFolder = 'val'
+        elif MODELTYPE == ModelType.YOLOMG:
+            splitFolder = 'val'
     elif 'test' in split_name.lower():
         splitFolder = 'test'
     else:
@@ -462,6 +663,32 @@ def createDatasetSplitDirectory(folder_root, folder_name, split_name, dataset_ty
         
         split_dir = data_vid_dir
         annotation_dst = None  # YOLOV uses XML files, not JSON
+        dst = split_dir  # Set dst for image copying
+        
+    # Create YOLOMG-specific directory structure
+    elif MODELTYPE == ModelType.YOLOMG:
+        # Create YOLOv5-style flat structure for YOLOMG
+        output_base = os.path.join(folder_root, folder_name)
+        images_dir = os.path.join(output_base, "images")
+        labels_dir = os.path.join(output_base, "labels")
+        masks_dir = os.path.join(output_base, "masks")
+        imagesets_dir = os.path.join(output_base, "ImageSets", "Main")
+        
+        try:
+            os.makedirs(images_dir, exist_ok=True)
+            os.makedirs(labels_dir, exist_ok=True)
+            os.makedirs(masks_dir, exist_ok=True)
+            os.makedirs(imagesets_dir, exist_ok=True)
+            print(f"Created YOLOMG images directory: {images_dir}")
+            print(f"Created YOLOMG labels directory: {labels_dir}")
+            print(f"Created YOLOMG masks directory: {masks_dir}")
+            print(f"Created YOLOMG ImageSets directory: {imagesets_dir}")
+        except Exception as e:
+            print(f"Error creating YOLOMG directories: {e}")
+            return
+        
+        split_dir = images_dir  # Images go in the flat images directory
+        annotation_dst = None  # YOLOMG uses YOLO format .txt files, not JSON
         dst = split_dir  # Set dst for image copying
         
     # Create TransVOD-specific directory structure
@@ -503,8 +730,8 @@ def createDatasetSplitDirectory(folder_root, folder_name, split_name, dataset_ty
         annotation_dst = os.path.join(split_dir, '_annotations.coco.json')
         dst = split_dir  # Set dst for image copying
 
-    # Always create a new empty annotation file (except for YOLOV which uses XML)
-    if MODELTYPE != ModelType.YOLOV:
+    # Always create a new empty annotation file (except for YOLOV and YOLOMG which use different formats)
+    if MODELTYPE != ModelType.YOLOV and MODELTYPE != ModelType.YOLOMG:
         empty_annotation = {"images": [], "annotations": [], "categories": []}
         
         if 'visdrone' in dataset_type.lower():
@@ -624,6 +851,9 @@ def createDatasetSplitDirectory(folder_root, folder_name, split_name, dataset_ty
                         seq_dir = os.path.join(dst, seq)
                         os.makedirs(seq_dir, exist_ok=True)
                         dst_img_path = os.path.join(seq_dir, new_img_name)
+                    elif MODELTYPE == ModelType.YOLOMG:
+                        # For YOLOMG, use flat directory structure
+                        dst_img_path = os.path.join(dst, new_img_name)
                     else:
                         dst_img_path = os.path.join(dst, new_img_name)
                     
@@ -652,14 +882,28 @@ def createDatasetSplitDirectory(folder_root, folder_name, split_name, dataset_ty
                     create_yolov_xml_annotations(annotation_file_path, image_name_dict, seq, splitFolder, output_base)
                 else:
                     print(f"Warning: Annotation file not found: {annotation_file_path}")
+            elif MODELTYPE == ModelType.YOLOMG:
+                # For YOLOMG, create YOLO format annotations and motion masks
+                annotation_file_path = os.path.join(src_annotation_file_path, seq + ".txt")
+                # Handle UAVDT special case where annotation files have _gt_whole suffix
+                if DATASETTYPE == DatasetType.UAVDT:
+                    annotation_file_path = os.path.join(src_annotation_file_path, seq + "_gt_whole.txt")
+                    
+                if os.path.exists(annotation_file_path):
+                    print(f"Creating YOLO annotations and motion masks for sequence {seq}...")
+                    # Parse annotations and create YOLO files + motion masks
+                    output_base = os.path.join(folder_root, folder_name)
+                    create_yolomg_annotations(annotation_file_path, image_name_dict, seq, splitFolder, output_base)
+                else:
+                    print(f"Warning: Annotation file not found: {annotation_file_path}")
             else:
                 annotation_count = insertNewAnnotationEntry(batch_annotations, os.path.join(src_annotation_file_path, seq + ".txt"), image_name_dict, annotation_count)
                 print(f"Inserted annotations up to ID: {annotation_count}")
         else:
             print(f"Warning: Sequence path is not a directory: {seq_path}")
 
-    # Save annotation file once after all changes (except for YOLOV)
-    if MODELTYPE != ModelType.YOLOV:
+    # Save annotation file once after all changes (except for YOLOV and YOLOMG)
+    if MODELTYPE != ModelType.YOLOV and MODELTYPE != ModelType.YOLOMG:
         try:
             with open(annotation_dst, 'r') as f:
                 data = json.load(f)
@@ -674,12 +918,50 @@ def createDatasetSplitDirectory(folder_root, folder_name, split_name, dataset_ty
                 json.dump(data, f, indent=2)
         except Exception as e:
             print(f"Error updating annotation file '{annotation_dst}': {e}")
+    
+    # Generate file lists for YOLOMG
+    if MODELTYPE == ModelType.YOLOMG:
+        # Create file lists in ImageSets/Main directory
+        output_base = os.path.join(folder_root, folder_name)
+        imagesets_dir = os.path.join(output_base, "ImageSets", "Main")
+        
+        # Collect all image files
+        images_dir = os.path.join(output_base, "images")
+        image_files = []
+        
+        if os.path.exists(images_dir):
+            for img_file in os.listdir(images_dir):
+                if img_file.lower().endswith(('.jpg', '.jpeg', '.png')):
+                    # Remove extension for file list
+                    img_name = os.path.splitext(img_file)[0]
+                    image_files.append(img_name)
+        
+        image_files.sort()  # Sort for consistency
+        
+        # Write file lists based on split
+        if splitFolder == 'train':
+            train_file = os.path.join(imagesets_dir, "train.txt")
+            train2_file = os.path.join(imagesets_dir, "train2.txt")
+            with open(train_file, 'w') as f:
+                f.write('\n'.join(image_files))
+            with open(train2_file, 'w') as f:
+                f.write('\n'.join(image_files))
+            print(f"Created YOLOMG train file lists with {len(image_files)} images")
+        elif splitFolder == 'val':
+            val_file = os.path.join(imagesets_dir, "val.txt")
+            val2_file = os.path.join(imagesets_dir, "val2.txt")
+            with open(val_file, 'w') as f:
+                f.write('\n'.join(image_files))
+            with open(val2_file, 'w') as f:
+                f.write('\n'.join(image_files))
+            print(f"Created YOLOMG val file lists with {len(image_files)} images")
+            
     return
 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
 
-    ap.add_argument('--model', type=str, required=True, choices=['rfdetr', 'transvod', 'yolov'], help='Model type: rfdetr, transvod, or yolov')
+    ap.add_argument('--model', type=str, required=True, choices=['rfdetr', 'transvod', 'yolov', 'yolomg'], help='Model type: rfdetr, transvod, yolov, or yolomg')
     ap.add_argument('--dataset_type', type=str, required=True, choices=datasetTypes, help='Type of dataset. Currently only supports visdrone and uavdt')
     ap.add_argument('--data_root', type=str, required=True, help='Root folder where the datasets are stored')
 
@@ -707,6 +989,9 @@ if __name__ == '__main__':
     elif model_type == 'yolov':
         MODELTYPE = ModelType.YOLOV
         model_dir_name = "YOLOV_VID"
+    elif model_type == 'yolomg':
+        MODELTYPE = ModelType.YOLOMG
+        model_dir_name = "YOLOMG_VID"
     else:
         print(f"Error: Unknown model type '{model_type}'.")
         sys.exit(1)
