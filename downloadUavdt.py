@@ -89,7 +89,8 @@ def find_seq_dir(seq_name: str) -> pathlib.Path | None:
 def pad_seq_filenames_inplace(seq_dir: pathlib.Path, digits: int = 7) -> int:
     """
     Rename image files in seq_dir so their numeric stems are zero-padded to `digits`.
-    E.g., 000001.jpg -> 0000001.jpg (for digits=7).
+    Also removes 'img' prefix if present.
+    E.g., img000001.jpg -> 0000001.jpg (for digits=7).
     Two-phase rename to avoid collisions.
     """
     exts = {".jpg", ".jpeg", ".png", ".bmp"}
@@ -98,6 +99,9 @@ def pad_seq_filenames_inplace(seq_dir: pathlib.Path, digits: int = 7) -> int:
     mapping = {}
     for p in files:
         stem = p.stem
+        # Remove 'img' prefix if present
+        if stem.startswith('img'):
+            stem = stem[3:]
         try:
             num = int(stem)  # handles "000001" etc.
         except ValueError:

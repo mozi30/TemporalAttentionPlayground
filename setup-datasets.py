@@ -11,17 +11,17 @@ def main():
     repo = Path(__file__).resolve().parent
 
     # Optional download steps (uncomment if you use them)
-    run(["python3", str(repo / "downloadVisdrone.py"), "--root", "datasets/visdrone"])
+    #run(["python3", str(repo / "downloadVisdrone.py"), "--root", "datasets/visdrone"])
     run(["python3", str(repo / "downloadUavdt.py"), "--root", "datasets/uavdt"])
     
     # --- VisDrone: generate structure ---
-    run([
+    """run([
         "python3", str(repo / "generate-dataset-structure.py"),
         "--root", "datasets/visdrone",
         "--dataset", "visdrone",
         "--category-map-vd-to-ivid", "visdrone_categories_10.json",
         "--category-map-ivid-to-coco", "visdrone_coco_categories_10.json"
-    ])
+    ])"""
 
     # --- UAVDT: generate structure ---
     run([
@@ -36,7 +36,7 @@ def main():
     # --- Finalize both datasets into RF-DETR + ILSVRC layouts ---
     # If you saved the script under a different name (e.g., finaliseDatasets.py),
     # update the filename below accordingly.
-    run([
+    """run([
     "python3", str(repo / "buildImageNtVid.py"),
     "--dataset", "visdrone",
     "--root", "datasets/visdrone",
@@ -64,7 +64,7 @@ def main():
     "--root", "datasets/uavdt",
     "--out", "datasets/uavdt/COCO",
     "--copy",
-    ])
+    ])"""
 
     print("All done.")
 
