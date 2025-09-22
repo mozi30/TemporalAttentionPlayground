@@ -1,9 +1,6 @@
 [submodule "rf-detr"]
 	path = rf-detr
 	url = git@github.com:mozi30/rf-detr.git
-[submodule "TemporalAttentionPlayground"]
-	path = TemporalAttentionPlayground
-	url = git@github.com:mozi30/TemporalAttentionPlayground.git
 [submodule "TransVOD_plusplus"]
 	path = TransVOD_plusplus
 	url = git@github.com:mozi30/TransVOD_plusplus.git
@@ -13,3 +10,6 @@
 [submodule "YOLOV"]
 	path = YOLOV
 	url = git@github.com:mozi30/YOLOV.git
+[submodule "ultralytics"]
+	path = ultralytics
+	url = git@github.com:mozi30/ultralytics.git
