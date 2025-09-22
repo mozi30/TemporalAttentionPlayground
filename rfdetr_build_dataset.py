@@ -1002,13 +1002,13 @@ if __name__ == '__main__':
     print(f"Model directory name: {model_dir_name}")
     print(f"Using split names: {split_names}")
 
-    rf_detr_dir = os.path.join(data_root, model_dir_name)
-    if not os.path.exists(rf_detr_dir):
+    model_dir = os.path.join(data_root, model_dir_name)
+    if not os.path.exists(model_dir):
         try:
-            os.makedirs(rf_detr_dir)
-            print(f"Created {model_dir_name} directory: {rf_detr_dir}")
+            os.makedirs(model_dir)
+            print(f"Created {model_dir_name} directory: {model_dir}")
         except Exception as e:
-            print(f"Error creating {model_dir_name} directory '{rf_detr_dir}': {e}")
+            print(f"Error creating {model_dir_name} directory '{model_dir}': {e}")
             sys.exit(1)
         for split_name in split_names:
             createDatasetSplitDirectory(data_root, model_dir_name, split_name, chosenDataSet)
@@ -1016,7 +1016,7 @@ if __name__ == '__main__':
         # Generate sequence files for YOLOV after all processing is complete
         if MODELTYPE == ModelType.YOLOV:
             print("\nGenerating YOLOV sequence files...")
-            generate_sequence_files(rf_detr_dir, yolov_train_sequences, yolov_val_sequences)
+            generate_sequence_files(model_dir, yolov_train_sequences, yolov_val_sequences)
     else:
-        print(f"{model_dir_name} directory already exists: {rf_detr_dir}")
+        print(f"{model_dir_name} directory already exists: {model_dir}")
         sys.exit(1)
