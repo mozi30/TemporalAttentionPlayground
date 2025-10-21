@@ -2,8 +2,9 @@
 import subprocess
 import sys
 from pathlib import Path
+from typing import List
 
-def run(cmd: list[str]):
+def run(cmd: List[str]):
     print(">>>", " ".join(cmd), flush=True)
     subprocess.run(cmd, check=True)
 
@@ -11,7 +12,8 @@ def main():
     repo = Path(__file__).resolve().parent
 
     # Optional download steps (uncomment if you use them)
-    #run(["python3", str(repo / "downloadVisdrone.py"), "--root", "datasets/visdrone"])
+    run(["python3", str(repo / "downloadVisdrone.py"), "--root", "datasets/visdrone"])
+    return
     run(["python3", str(repo / "downloadUavdt.py"), "--root", "datasets/uavdt"])
     
     # --- VisDrone: generate structure ---
