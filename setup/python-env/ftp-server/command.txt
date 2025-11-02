@@ -1,0 +1,36 @@
+Use this command for basic setup
+
+sudo bash setup-ubuntu-vsftpd.sh \
+  --user ftpuser \
+  --share /srv/ftp_share \
+  --pasv-min 50000 \
+  --pasv-max 50099 \
+  --domain minecraftwgwg.hopto.org \
+  --enable-ftps          # optional (creates self-signed cert + enables FTPS)
+  --open-ufw 
+
+It will prompt for the Linux user’s password, then it will:
+
+Install vsftpd (and openssl if FTPS enabled)
+
+Create /srv/ftp_share (or your chosen path) and set permissions
+
+Write a complete **/etc/vsftpd.conf** with:
+
+local_root set to your share
+
+pasv_enable=YES, range 50000–50099 (customizable)
+
+pasv_address=minecraftwgwg.hopto.org
+
+chroot_local_user=YES, allow_writeable_chroot=YES
+
+Logging + secure_chroot_dir
+
+Restart/enable vsftpd (works with or without systemd)
+
+Optionally opens UFW ports (21 + passive range) if you pass --open-ufw
+
+Note for WSL: this script doesn’t touch Windows port forwarding/firewall. If you’re on WSL and need external access, handle that separately.
+
+If you want me to bake in your exact defaults (user, ports, path, domain) so you can run it with zero flags, say the word and I’ll regenerate the file with those values pre-set.
