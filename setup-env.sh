@@ -20,6 +20,8 @@ INSTALL_MEGACMD=${INSTALL_MEGACMD:-1}           # 1 = install MEGAcmd if missing
 MEGA_LOGIN_ON_START=${MEGA_LOGIN_ON_START:-1}   # 1 = login before downloads
 DOWNLOAD_VISDRONE_MEGA=${DOWNLOAD_VISDRONE_MEGA:-1}  # 1 to download VisDrone via MEGA (python helper)
 CONVERT_VISDRONE_TRANSVOD=${CONVERT_VISDRONE_TRANSVOD:-1}  # 1 to convert VisDrone to TransVOD format
+CONVERT_VISDRONE_YOLOV=${CONVERT_VISDRONE_YOLOV:-1}  # 1 to convert VisDrone to YOLOV format
+CREATE_YOLOX_ANNOTS=${CREATE_YOLOX_ANNOTS:-1}  # 1 to create YOLOX annotations from VisDrone
 FORCE_RUN=${FORCE_RUN:-0}                    # 1 to ignore step markers and redo
 
 # ===== Paths & versions ======================================================
@@ -628,6 +630,7 @@ install_megacmd() {
 
 # ===== MEGAcmd login/session ================================================
 mega_login() {
+  [ "${MEGA_LOGIN_ON_START}" -eq 1 ] || { warn "Skipping MEGA login"; return 0; }
   local step="mega_login"
   # We **don't** mark done, to allow re-login if env changes; just run idempotently.
 
@@ -671,6 +674,7 @@ mega_login() {
 }
 
 download_datasets_mega() {
+  [ "${DOWNLOAD_VISDRONE_MEGA}" -eq 1 ] || { warn "Skipping VisDrone MEGA download"; return 0; }
   local step="visdrone_mega"
   if already_done "$step"; then warn "VisDrone MEGA download already done; skipping"; return 0; fi
 
@@ -784,7 +788,7 @@ convert_visdrone_to_imagenetvid() {
   local train_dir="$HOME/datasets/visdrone/VisDrone2019-VID-train"
   local val_dir="$HOME/datasets/visdrone/VisDrone2019-VID-val"
   local out_dir="$HOME/datasets/visdrone/transvod"
-
+  pip install pillow  # Ensure PIL is present for the converter
   # Support alternate naming in case someone used datasets-visdrone
   if [ ! -d "$train_dir" ] && [ -d "$HOME/datasets-visdrone/VisDrone2019-VID-train" ]; then
     train_dir="$HOME/datasets-visdrone/VisDrone2019-VID-train"
@@ -801,20 +805,107 @@ convert_visdrone_to_imagenetvid() {
   mkdir -p "$out_dir"
 
   # Run the converter script
-  if [ -f "$REPO_DIR/testVisdroneToImageNetVid.py" ]; then
-    python3 "$REPO_DIR/testVisdroneToImageNetVid.py" \
+  if [ -f "$REPO_DIR/code/transvodVisdroneBuilder.py" ]; then
+    python3 "$REPO_DIR/code/transvodVisdroneBuilder.py" \
       --visdrone-train "$train_dir" \
       --visdrone-val "$val_dir" \
       --out-root "$out_dir" \
       --link-mode hardlink
   else
-    err "Converter not found: $REPO_DIR/testVisdroneToImageNetVid.py"
+    err "Converter not found: $REPO_DIR/code/transvodVisdroneBuilder.py"
     return 1
   fi
 
   ok "VisDrone conversion completed → $out_dir"
   mark_done "$step"
 }
+
+# ===== Convert VisDrone to YoloV format ================================
+convert_visdrone_to_yolov() {
+  [ "${CONVERT_VISDRONE_YOLOV}" -eq 1 ] || { warn "Skipping VisDrone->YoloV conversion"; return 0; }
+  local step="convert_visdrone_yolov"
+  if already_done "$step"; then
+    warn "VisDrone->YoloV conversion already done; skipping"
+    return 0
+  fi
+
+  section "Converting VisDrone to YoloV format"
+
+  local train_dir="$HOME/datasets/visdrone/VisDrone2019-VID-train"
+  local val_dir="$HOME/datasets/visdrone/VisDrone2019-VID-val"
+  local out_dir="$HOME/datasets/visdrone/yolov"
+  pip install pillow  # Ensure PIL is present for the converter
+  # Support alternate naming in case someone used datasets-visdrone
+  if [ ! -d "$train_dir" ] && [ -d "$HOME/datasets-visdrone/VisDrone2019-VID-train" ]; then
+    train_dir="$HOME/datasets-visdrone/VisDrone2019-VID-train"
+  fi
+  if [ ! -d "$val_dir" ] && [ -d "$HOME/datasets-visdrone/VisDrone2019-VID-val" ]; then
+    val_dir="$HOME/datasets-visdrone/VisDrone2019-VID-val"
+  fi
+
+  if [ ! -d "$train_dir" ] || [ ! -d "$val_dir" ]; then
+    err "Missing VisDrone train/val directories. Download them first (MEGA or FTP)."
+    return 1
+  fi
+
+  mkdir -p "$out_dir"
+
+  # Run the converter script
+  if [ -f "$REPO_DIR/code/yolovVisdroneBuilder.py" ]; then
+    python3 "$REPO_DIR/code/yolovVisdroneBuilder.py" \
+      --visdrone-train "$train_dir" \
+      --visdrone-val "$val_dir" \
+      --out-root "$out_dir" \
+      --link-mode hardlink
+  else
+    err "Converter not found: $REPO_DIR/code/yolovVisdroneBuilder.py"
+    return 1
+  fi
+
+  ok "VisDrone conversion completed → $out_dir"
+  mark_done "$step"
+}
+
+ create_yolox_annotations() {
+  [ "${CREATE_YOLOX_ANNOTS}" -eq 1 ] || { warn "Skipping YOLOX annotation creation"; return 0; }
+  local step="create_yolox_annots"
+  if already_done "$step"; then
+    warn "YOLOX annotation creation already done; skipping"
+    return 0
+  fi
+
+  section "Creating YOLOX annotations for VisDrone dataset"
+
+  local yolov_dir="$HOME/datasets/visdrone/yolov/annotations"
+  if [ ! -d "$yolov_dir" ]; then
+    err "Missing YoloV dataset directory. Convert VisDrone to YoloV format first."
+    return 1
+  fi
+
+  if [ -f /root/activate_yolox.sh ]; then
+  # Activate YOLOX environment
+  source /root/activate_yolox.sh
+else
+  err "Missing /root/activate_yolox.sh. Make sure the YOLOX environment exists."
+  return 1
+fi
+
+
+  # Run the annotation creation script
+  if [ -f "$REPO_DIR/code/yoloxVisdroneBuilder.py" ]; then
+    python3 "$REPO_DIR/code/yoloxVisdroneBuilder.py"
+  else
+    err "Annotation creation script not found: $REPO_DIR/code/yoloxVisdroneBuilder.py"
+    return 1
+  fi
+
+  conda deactivate
+  set -u
+
+  ok "YOLOX annotation creation completed → $yolov_dir"
+  mark_done "$step"
+ }
+
 
 
 
@@ -836,6 +927,9 @@ main() {
   install_megacmd
   mega_login
   download_datasets_mega
+  convert_visdrone_to_imagenetvid
+  convert_visdrone_to_yolov
+  create_yolox_annotations
   ok "Setup complete"
   echo "Tip: activate with 'source ${HELPER_SCRIPT_MSDA}' or 'source ${HELPER_SCRIPT_YOLOX}'"
 }
