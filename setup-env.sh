@@ -589,31 +589,60 @@ install_megacmd() {
     return 0
   fi
 
+  # --- Detect Ubuntu release ---
+  local CODENAME VERSION_ID
+  CODENAME="$(. /etc/os-release && echo "${UBUNTU_CODENAME:-$(lsb_release -cs 2>/dev/null)}")"
+  VERSION_ID="$(. /etc/os-release && echo "${VERSION_ID:-}" | sed 's/"//g')"
+
+  # --- Where the .deb lives (override with MEGACMD_DEB_FILE / MEGACMD_DEB_DIR if you want) ---
+  local DEB_DIR="${MEGACMD_DEB_DIR:-$HOME/TemporalAttentionPlayground}"
+  local DEB_FILE="${MEGACMD_DEB_FILE:-}"
+
+  # Map codename -> expected .deb name (MEGA’s naming scheme)
+  if [ -z "$DEB_FILE" ]; then
+    case "$CODENAME" in
+      noble) DEB_FILE="megacmd-xUbuntu_24.04_amd64.deb" ;;
+      jammy) DEB_FILE="megacmd-xUbuntu_22.04_amd64.deb" ;;
+      focal) DEB_FILE="megacmd-xUbuntu_20.04_amd64.deb" ;;
+      *)     DEB_FILE="megacmd-xUbuntu_${VERSION_ID}_amd64.deb" ;; # best guess
+    esac
+  fi
+
+  local DEB_PATH="$DEB_DIR/$DEB_FILE"
+
+  # --- Ensure we don't have a broken MEGA repo messing with apt update ---
+  if [ -f /etc/apt/sources.list.d/meganz.list ] || [ -f /usr/share/keyrings/meganz-archive-keyring.gpg ]; then
+    section "Cleaning stale MEGA apt repo"
+    sudo rm -f /etc/apt/sources.list.d/meganz.list /usr/share/keyrings/meganz-archive-keyring.gpg
+  fi
+
   if command -v apt-get >/dev/null 2>&1; then
-    section "Installing MEGAcmd via apt"
+    section "Installing MEGAcmd from local .deb ($DEB_FILE)"
+    # Preflight: needed basics
     set +e
-    sudo apt-get update -y
-    sudo apt-get install -y --no-install-recommends apt-transport-https ca-certificates lsb-release wget gnupg || true
+    sudo apt-get update -y || warn "apt-get update encountered issues; continuing"
+    sudo apt-get install -y --no-install-recommends ca-certificates lsb-release wget gnupg || true
 
-    # Add MEGA repo (Ubuntu)
-    UBUNTU_CODENAME="$(. /etc/os-release && echo "${UBUNTU_CODENAME:-$(lsb_release -cs 2>/dev/null)}")"
-    if [ -z "$UBUNTU_CODENAME" ]; then UBUNTU_CODENAME="focal"; fi
-    sudo mkdir -p /usr/share/keyrings
-    sudo wget -qO /usr/share/keyrings/meganz-archive-keyring.gpg https://mega.nz/linux/repo/xUbuntu_${UBUNTU_CODENAME}/Release.key || true
-    echo "deb [signed-by=/usr/share/keyrings/meganz-archive-keyring.gpg] https://mega.nz/linux/repo/xUbuntu_${UBUNTU_CODENAME}/ ./" | sudo tee /etc/apt/sources.list.d/meganz.list >/dev/null
-
-    sudo apt-get update -y
-    sudo apt-get install -y --no-install-recommends megacmd || {
-      warn "apt install megacmd failed; trying snap"
-      if command -v snap >/dev/null 2>&1; then
-        sudo snap install megacmd || {
-          err "Could not install MEGAcmd"; return 1;
-        }
-      else
-        err "No snap available and apt install failed. Install MEGAcmd manually and rerun."
-        return 1
+    if [ ! -f "$DEB_PATH" ]; then
+      err "Local package not found: $DEB_PATH"
+      # Helpful hint for common mismatch
+      if [ "$CODENAME" = "jammy" ] && [ -f "$DEB_DIR/megacmd-xUbuntu_24.04_amd64.deb" ]; then
+        err "You are on Ubuntu 22.04 (jammy). Place megacmd-xUbuntu_22.04_amd64.deb in $DEB_DIR and rerun."
       fi
-    }
+      return 1
+    fi
+
+    # Try install, then fix deps, then re-try
+    sudo dpkg -i "$DEB_PATH"
+    local dpkg_rc=$?
+    if [ $dpkg_rc -ne 0 ]; then
+      warn "dpkg reported dependency problems (rc=$dpkg_rc); attempting to fix"
+      sudo apt-get -f install -y || { err "Could not fix dependencies automatically"; return 1; }
+      sudo dpkg -i "$DEB_PATH" || {
+        err "MEGAcmd .deb still failed to configure. Likely distro/version mismatch (you have $CODENAME, package is $DEB_FILE)."
+        return 1
+      }
+    fi
     set -e
   else
     err "apt-get not available; please install MEGAcmd manually"
@@ -658,11 +687,7 @@ mega_login() {
 
   # Clean stale sessions and login
   mega-logout >/dev/null 2>&1 || true
-  if [ -n "${MEGA_2FA}" ]; then
-    mega-login "${MEGA_EMAIL}" "${MEGA_PASS}" --auth-code "${MEGA_2FA}"
-  else
-    mega-login "${MEGA_EMAIL}" "${MEGA_PASS}"
-  fi
+  mega-login "${MEGA_EMAIL}" "${MEGA_PASS}"
 
   # Validate
   if mega-whoami >/dev/null 2>&1; then
