@@ -22,6 +22,7 @@ DOWNLOAD_VISDRONE_MEGA=${DOWNLOAD_VISDRONE_MEGA:-1}  # 1 to download VisDrone vi
 CONVERT_VISDRONE_TRANSVOD=${CONVERT_VISDRONE_TRANSVOD:-1}  # 1 to convert VisDrone to TransVOD format
 CONVERT_VISDRONE_YOLOV=${CONVERT_VISDRONE_YOLOV:-1}  # 1 to convert VisDrone to YOLOV format
 CREATE_YOLOX_ANNOTS=${CREATE_YOLOX_ANNOTS:-1}  # 1 to create YOLOX annotations from VisDrone
+DOWNLOAD_YOLOV_WEIGHTS=${DOWNLOAD_YOLOV_WEIGHTS:-1}  # 1 to download pretrained YOLOV weights
 FORCE_RUN=${FORCE_RUN:-0}                    # 1 to ignore step markers and redo
 
 # ===== Paths & versions ======================================================
@@ -906,6 +907,34 @@ fi
   mark_done "$step"
  }
 
+ download_yolov_weights() {
+  [ "${DOWNLOAD_YOLOV_WEIGHTS}" -eq 1 ] || { warn "Skipping YOLOV weights download"; return 0; }
+  local step="download_yolov_weights"
+  if already_done "$step"; then
+    warn "YOLOV weights already downloaded; skipping"
+    return 0
+  fi
+
+  section "Downloading YOLOV pretrained weights"
+
+  local weights_dir="$HOME/weights/yolov"
+  local swinb_checkpoint_url="https://mega.nz/file/liBxwDwS#OIE_VxM7i2TvfxeC93C-Ptyh9VwshuGOlTe0v5vtdig"
+  local v_swinBase="https://mega.nz/file/Iyx1xYLC#ByppxgdCtkhZGzssrciC74QtvlEheXCtqGUHylgm3lg"
+
+  mkdir -p "$weights_dir"
+
+  # Run the weights download script
+  if [ -f "$REPO_DIR/code/mega-downloader.py" ]; then
+    python3 "$REPO_DIR/code/mega-downloader.py" "$swinb_checkpoint_url" "$weights_dir"/swinb_checkpoint.pth
+    python3 "$REPO_DIR/code/mega-downloader.py" "$v_swinBase" "$weights_dir"/v_swinBase.pth
+  else
+    err "Weights download script not found: $REPO_DIR/code/mega-downloader.py"
+    return 1
+  fi
+
+  ok "YOLOV weights downloaded → $weights_dir"
+  mark_done "$step"
+}
 
 
 
@@ -930,6 +959,7 @@ main() {
   convert_visdrone_to_imagenetvid
   convert_visdrone_to_yolov
   create_yolox_annotations
+  download_yolov_weights
   ok "Setup complete"
   echo "Tip: activate with 'source ${HELPER_SCRIPT_MSDA}' or 'source ${HELPER_SCRIPT_YOLOX}'"
 }
