@@ -23,6 +23,9 @@ CONVERT_VISDRONE_TRANSVOD=${CONVERT_VISDRONE_TRANSVOD:-1}  # 1 to convert VisDro
 CONVERT_VISDRONE_YOLOV=${CONVERT_VISDRONE_YOLOV:-1}  # 1 to convert VisDrone to YOLOV format
 CREATE_YOLOX_ANNOTS=${CREATE_YOLOX_ANNOTS:-1}  # 1 to create YOLOX annotations from VisDrone
 DOWNLOAD_YOLOV_WEIGHTS=${DOWNLOAD_YOLOV_WEIGHTS:-1}  # 1 to download pretrained YOLOV weights
+CREATE_VISDRONE_COCO_ANNOTS=${CREATE_VISDRONE_COCO_ANNOTS:-1}  # 1 to create COCO annots for VisDrone
+DOWNLOAD_SWIN_WEIGHTS=${DOWNLOAD_SWIN_WEIGHTS:-1}    # 1 to download Swin Transformer pretrained weights
+DOWNLOAD_YOLOX_COCO_WEIGHTS=${DOWNLOAD_YOLOX_COCO_WEIGHTS:-1}  # 1 to download YOLOX COCO pretrained weights
 FORCE_RUN=${FORCE_RUN:-0}                    # 1 to ignore step markers and redo
 
 # ===== Paths & versions ======================================================
@@ -368,7 +371,7 @@ run_visdrone_tools() {
   if [ -d "${VISDRONE_TRANSVOD}/ILSVRC2015" ]; then
     warn "Converted VisDrone (TransVOD format) already present; skipping conversion"
   else
-    python3 "${REPO_DIR}/testVisdroneToImageNetVid.py" \
+    python3 "${REPO_DIR}/code/testVisdroneToImageNetVid.py" \
       --visdrone-train "${VISDRONE_ROOT}/VisDrone2019-VID-train" \
       --visdrone-val   "${VISDRONE_ROOT}/VisDrone2019-VID-val" \
       --out-root       "${VISDRONE_TRANSVOD}" \
@@ -961,6 +964,99 @@ fi
   mark_done "$step"
 }
 
+create_visdrone_coco_annotations() {
+  [ "${CREATE_VISDRONE_COCO_ANNOTS}" -eq 1 ] || { warn "Skipping COCO annotation creation"; return 0; }
+  local step="create_visdrone_coco_annots"
+  if already_done "$step"; then
+    warn "COCO annotation creation already done; skipping"
+    return 0
+  fi
+
+  section "Creating COCO annotations for VisDrone dataset"
+
+  local visdrone_dir="$HOME/datasets/visdrone/yolov"
+  if [ ! -d "$visdrone_dir" ]; then
+    err "Missing VisDrone dataset directory. Download VisDrone first."
+    return 1
+  fi
+
+  # Run the COCO annotation creation script
+  if [ -f "$REPO_DIR/code/annotations/flatten-vid-annotation.py" ]; then
+    python3 "$REPO_DIR/code/annotations/flatten-vid-annotation.py" "$visdrone_dir/annotations/imagenet_vid_train.json" "$visdrone_dir/annotations/imagenet_vid_train_coco.json"
+    python3 "$REPO_DIR/code/annotations/flatten-vid-annotation.py" "$visdrone_dir/annotations/imagenet_vid_val.json" "$visdrone_dir/annotations/imagenet_vid_val_coco.json"
+  else
+    err "COCO annotation creation script not found: $REPO_DIR/code/annotations/flatten-vid-annotation.py"
+    return 1
+  fi
+
+  ok "COCO annotation creation completed → $visdrone_dir/annotations"
+  mark_done "$step"
+}
+
+# ===== Download Swin Transformer pretrained weights ==========================
+download_swin_weights() {
+  [ "${DOWNLOAD_SWIN_WEIGHTS}" -eq 1 ] || { warn "Skipping Swin weights download"; return 0; }
+  local step="download_swin_weights"
+  if already_done "$step"; then
+    warn "Swin weights already downloaded; skipping"
+    return 0
+  fi
+
+  section "Downloading Swin Transformer pretrained weights"
+
+  local weights_dir="$REPO_DIR/YOLOV/pretrained"
+  mkdir -p "$weights_dir"
+
+  local swin_base_url="https://github.com/SwinTransformer/storage/releases/download/v1.0.0/swin_base_patch4_window7_224_22k.pth"
+  local swin_base_file="$weights_dir/swin_base_patch4_window7_224_22k.pth"
+
+  if [ ! -f "$swin_base_file" ]; then
+    info "Downloading Swin-Base-22K pretrained weights (~418MB)..."
+    wget -q --show-progress "$swin_base_url" -O "$swin_base_file"
+    ok "Downloaded Swin-Base weights → $swin_base_file"
+  else
+    ok "Swin-Base weights already exist → $swin_base_file"
+  fi
+
+  mark_done "$step"
+}
+
+# ===== Download YOLOX COCO pretrained weights =================================
+download_yolox_coco_weights() {
+  [ "${DOWNLOAD_YOLOX_COCO_WEIGHTS}" -eq 1 ] || { warn "Skipping YOLOX COCO weights download"; return 0; }
+  local step="download_yolox_coco_weights"
+  if already_done "$step"; then
+    warn "YOLOX COCO weights already downloaded; skipping"
+    return 0
+  fi
+
+  section "Downloading YOLOX COCO pretrained weights"
+
+  local weights_dir="$HOME/weights/yolox_coco"
+  local yolox_dir="$REPO_DIR/YOLOV/pretrained"
+  mkdir -p "$weights_dir"
+  mkdir -p "$yolox_dir"
+
+  local yolox_l_url="https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_l.pth"
+  local yolox_l_file="$weights_dir/yolox_l.pth"
+
+  if [ ! -f "$yolox_l_file" ]; then
+    info "Downloading YOLOX-L COCO pretrained weights (~415MB)..."
+    wget -q --show-progress "$yolox_l_url" -O "$yolox_l_file"
+    ok "Downloaded YOLOX-L weights → $yolox_l_file"
+  else
+    ok "YOLOX-L weights already exist → $yolox_l_file"
+  fi
+
+  # Create symlink in YOLOV/pretrained directory
+  if [ ! -L "$yolox_dir/yolox_l.pth" ]; then
+    ln -sf "$yolox_l_file" "$yolox_dir/yolox_l.pth"
+    ok "Created symlink → $yolox_dir/yolox_l.pth"
+  fi
+
+  mark_done "$step"
+}
+
 
 
 
@@ -975,7 +1071,7 @@ main() {
   conda_shell_hook
   setup_env_msda
   build_transvod_ops
-  run_visdrone_tools
+  #run_visdrone_tools
   setup_env_yolox
   #download_datasets_ftp
   install_megacmd
@@ -985,6 +1081,9 @@ main() {
   convert_visdrone_to_yolov
   create_yolox_annotations
   download_yolov_weights
+  create_visdrone_coco_annotations
+  download_swin_weights
+  download_yolox_coco_weights
   ok "Setup complete"
   echo "Tip: activate with 'source ${HELPER_SCRIPT_MSDA}' or 'source ${HELPER_SCRIPT_YOLOX}'"
 }
