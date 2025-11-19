@@ -14,12 +14,12 @@ Changes vs original:
 - 'images' key removed (not part of the requested schema).
 - Verification checks 'videos[*].file_names'.
 
-Relative file paths in JSON are resolved from: {out_root}/Data/VID
+Relative file paths in JSON are resolved from: {out_root}/
 
 Layout created/expected:
   out_root/
-    Data/VID/VisDrone-VID/train/sequences/<video>/*.jpg
-    Data/VID/VisDrone-VID/val/sequences/<video>/*.jpg
+    /train/sequences/<video>/*.jpg
+    /val/sequences/<video>/*.jpg
     annotations/imagenet_vid_train.json
     annotations/imagenet_vid_val.json
 """
@@ -340,7 +340,7 @@ def parse_split_to_coco_vid(
 
 
 def verify_paths(json_path: str, vid_path: str, limit_videos: int = 3, limit_frames: int = 3) -> bool:
-    """Verify a few resolved file_names under Data/VID."""
+    """Verify a few resolved file_names under root path."""
     try:
         with open(json_path, "r") as f:
             data = json.load(f)
@@ -348,7 +348,7 @@ def verify_paths(json_path: str, vid_path: str, limit_videos: int = 3, limit_fra
         print(f"Failed to open {json_path}: {e}")
         return False
     ok = True
-    base = os.path.join(vid_path, "Data", "VID")
+    base = vid_path
     vids = data.get("videos", [])
     for v in vids[:limit_videos]:
         fnames = v.get("file_names", [])[:limit_frames]
@@ -373,7 +373,7 @@ def main():
         "--link-mode",
         choices=["symlink", "copy", "hardlink", "none"],
         default="symlink",
-        help="How to place images under out-root/Data/VID (default: symlink)",
+        help="How to place images under out-root/ (default: symlink)",
     )
     ap.add_argument("--force", action="store_true", help="Force replace existing destination paths when linking/copying")
     ap.add_argument(
@@ -388,14 +388,14 @@ def main():
     # Ensure out_root base exists
     out_root = Path(args.out_root)
     (out_root / "annotations").mkdir(parents=True, exist_ok=True)
-    (out_root / "Data" / "VID").mkdir(parents=True, exist_ok=True)
+    (out_root).mkdir(parents=True, exist_ok=True)
 
     categories, ignored_ids = load_categories(args.categories_json, args.keep_others)
 
     # Prepare train placement
-    rel_train_prefix = os.path.join("VisDrone-VID", "train")
+    rel_train_prefix = "train"
     src_train_seq = os.path.join(args.visdrone_train, "sequences")
-    dst_train_seq = os.path.join(args.out_root, "Data", "VID", rel_train_prefix, "sequences")
+    dst_train_seq = os.path.join(args.out_root, rel_train_prefix, "sequences")
     if args.link_mode != "none":
         print(f"Placing train images via {args.link_mode} ...")
         link_or_copy_sequences(src_train_seq, dst_train_seq, args.link_mode, force=args.force, fallback=args.fallback)
@@ -413,9 +413,9 @@ def main():
     print(f"Wrote {train_out}  videos={len(train_json['videos'])}  tracks={len(train_json['annotations'])}")
 
     # Prepare val placement
-    rel_val_prefix = os.path.join("VisDrone-VID", "val")
+    rel_val_prefix = "val"
     src_val_seq = os.path.join(args.visdrone_val, "sequences")
-    dst_val_seq = os.path.join(args.out_root, "Data", "VID", rel_val_prefix, "sequences")
+    dst_val_seq = os.path.join(args.out_root, rel_val_prefix, "sequences")
     if args.link_mode != "none":
         print(f"Placing val images via {args.link_mode} ...")
         link_or_copy_sequences(src_val_seq, dst_val_seq, args.link_mode, force=args.force, fallback=args.fallback)
