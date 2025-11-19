@@ -224,6 +224,18 @@ setup_miniconda() {
   fi
 
   "${CONDA_HOME}/bin/conda" init bash >/dev/null 2>&1 || true
+
+  # make `conda activate` available in this running script too
+  set +u
+  if [ -f "${CONDA_HOME}/etc/profile.d/conda.sh" ]; then
+    # shellcheck disable=SC1091
+    source "${CONDA_HOME}/etc/profile.d/conda.sh"
+  else
+    # fallback to shell hook
+    eval "$(${CONDA_HOME}/bin/conda shell.bash hook)" || true
+  fi
+  set -u
+
   ok "Miniconda ready"
   mark_done "$step"
 }
@@ -911,13 +923,17 @@ convert_visdrone_to_yolov() {
     return 1
   fi
 
-  if [ -f /root/activate_yolox.sh ]; then
-  # Activate YOLOX environment
-  source /root/activate_yolox.sh
-else
-  err "Missing /root/activate_yolox.sh. Make sure the YOLOX environment exists."
-  return 1
-fi
+  if [ -f "${HELPER_SCRIPT_YOLOX:-$HOME/activate_yolox.sh}" ]; then
+    # Activate YOLOX environment (sourcing makes conda activate available)
+    # shellcheck disable=SC1091
+    source "${HELPER_SCRIPT_YOLOX:-$HOME/activate_yolox.sh}"
+  elif [ -f /root/activate_yolox.sh ]; then
+    # In case script runs as root and helper is placed in /root
+    source /root/activate_yolox.sh
+  else
+    err "Missing activate_yolox helper. Expected at ${HELPER_SCRIPT_YOLOX:-$HOME/activate_yolox.sh} or /root/activate_yolox.sh"
+    return 1
+  fi
 
 
   # Run the annotation creation script
