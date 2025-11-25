@@ -22,6 +22,7 @@ def main():
     videos = src.get("videos", [])
     anns   = src.get("annotations", []) or []
     cats   = src.get("categories", [])
+    ignored_regions = src.get("ignored_regions", []) or []
     cat_id_to_name = {c["id"]: c["name"] for c in cats}
 
     # ------------------------------------------------------------------
@@ -58,6 +59,7 @@ def main():
     # Flatten annotations (skip Nones / invalid boxes)
     # ------------------------------------------------------------------
     coco_anns = []
+    coco_ignored_regions = []
     ann_id = 1
     counts = defaultdict(int)
     cat_counts = defaultdict(int)
@@ -146,6 +148,60 @@ def main():
             ann_id += 1
             counts["kept"] += 1
             cat_counts[cid] += 1
+        
+    ir_id = 1
+    for ir in ignored_regions:
+        vid = ir.get("video_id")
+        frame_id = ir.get("frame_id")
+        bbox = ir.get("bbox")
+
+        if vid not in vid_meta:
+            counts["skipped_ignored_missing_video"] += 1
+            continue
+        W, H, T = vid_meta[vid]
+
+        if (vid, frame_id) not in vid_frame_to_img:
+            # dropped due to subsample or out of range
+            if frame_id >= T:
+                counts["skipped_ignored_out_of_range"] += 1
+            continue
+
+        counts["ignored_frames_iterated"] += 1
+
+        if bbox is None:
+            counts["skipped_ignored_null_bbox"] += 1
+            continue
+        if (not isinstance(bbox, list)) or len(bbox) != 4:
+            counts["skipped_ignored_bad_bbox"] += 1
+            continue
+
+        x, y, w, h = bbox
+        if not (finite(x) and finite(y) and finite(w) and finite(h)):
+            counts["skipped_ignored_nonfinite"] += 1
+            continue
+        if w <= 0 or h <= 0:
+            counts["skipped_ignored_nonpos_wh"] += 1
+            continue
+
+        # Clip to image bounds
+        x = float(max(0.0, min(x, W)))
+        y = float(max(0.0, min(y, H)))
+        w = float(max(0.0, min(w, W - x)))
+        h = float(max(0.0, min(h, H - y)))
+        if w <= 0 or h <= 0:
+            counts["skipped_ignored_clipped_to_zero"] += 1
+            continue
+
+        img_id_ref = vid_frame_to_img[(vid, frame_id)]
+
+        coco_ignored_regions.append({
+            "id": ir_id,
+            "image_id": img_id_ref,
+            "bbox": [x, y, w, h],
+        })
+
+        ir_id += 1
+        counts["ignored_kept"] += 1
 
     # ------------------------------------------------------------------
     # Save COCO output
@@ -155,6 +211,7 @@ def main():
         "images": images,
         "annotations": coco_anns,
         "categories": cats,
+        "ignored_regions": coco_ignored_regions,
     }
 
     kw = {"ensure_ascii": False}
@@ -176,6 +233,7 @@ def main():
     print(f"Images created:       {len(images):,}")
     print(f"Annotations kept:     {counts['kept']:,}")
     print(f"Total annotations in: {counts['total_annotations']:,}")
+    print(f"Ignored regions kept: {counts['ignored_kept']:,}")
     print("-------------------------------------------")
     print("Skipped counts:")
     for k, v in sorted(counts.items()):

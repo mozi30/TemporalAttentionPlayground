@@ -50,7 +50,8 @@ DEFAULT_CATEGORIES = {
     9: "bus",
     10: "motor",
 }
-DEFAULT_IGNORED = {0, 11}
+IGNORED_REGION_LABEL = 0
+DEFAULT_IGNORED = {11}
 IMG_EXTS = (".jpg", ".jpeg", ".png", ".bmp")
 
 
@@ -66,7 +67,7 @@ def load_categories(categories_json: Optional[str], keep_others: bool) -> Tuple[
         if keep_others:
             cats[11] = "others"
             ignored = {0}
-        return cats, ignored
+        return cats, ignored, 
 
     with open(categories_json, "r") as f:
         raw = json.load(f)
@@ -229,6 +230,7 @@ def parse_split_to_coco_vid(
 
     videos: List[Dict[str, Any]] = []
     annotations: List[Dict[str, Any]] = []
+    ignored_regions: List[Dict[str, Any]] = []
     video_id = 1
     ann_id = 1
 
@@ -277,6 +279,14 @@ def parse_split_to_coco_vid(
                         cid = int(parts[7])
                     except Exception:
                         continue
+                    
+                    if cid == IGNORED_REGION_LABEL:
+                        ignored_regions.append({
+                            "video_id": video_id,
+                            "frame_id": frame_id,
+                            "bbox": [float(x), float(y), float(bw), float(bh)],
+                        })
+                        continue
 
                     if cid in ignored_ids or cid not in categories:
                         continue
@@ -300,6 +310,10 @@ def parse_split_to_coco_vid(
                     # If the same target_id appears with different categories, keep the first
                     if tr["category_id"] != cid:
                         # Optional: could warn; we'll keep the original category
+                        print(
+                            f"Warning: target_id {target_id} has conflicting categories "
+                            f"{tr['category_id']} and {cid} in video {vid_name}. Keeping the first."
+                        )
                         pass
 
                     tr["bboxes"][fidx] = [float(x), float(y), float(bw), float(bh)]
@@ -336,6 +350,7 @@ def parse_split_to_coco_vid(
         "videos": videos,
         "annotations": annotations,
         "categories": categories_list,
+        "ignored_regions": ignored_regions,
     }
 
 
