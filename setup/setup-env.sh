@@ -29,16 +29,19 @@ DOWNLOAD_YOLOX_COCO_WEIGHTS=${DOWNLOAD_YOLOX_COCO_WEIGHTS:-1}  # 1 to download Y
 FORCE_RUN=${FORCE_RUN:-0}                    # 1 to ignore step markers and redo
 
 # ===== Paths & versions ======================================================
-CONDA_HOME="${HOME}/miniconda3"
+source ./config.env
+CONDA_HOME="${TAP_HOME}/miniconda3"
 CUDA_VERSION_DIR="/usr/local/cuda-11.3"
 CUDA_RUNFILE="cuda_11.3.0_465.19.01_linux.run"
 CUDA_URL="https://developer.download.nvidia.com/compute/cuda/11.3.0/local_installers/${CUDA_RUNFILE}"
-HELPER_SCRIPT_MSDA="${HOME}/activate_msda.sh"
-HELPER_SCRIPT_YOLOX="${HOME}/activate_yolox.sh"
-REPO_DIR="$HOME/TemporalAttentionPlayground"
+HELPER_SCRIPT_MSDA="${TAP_HOME}/activate_msda.sh"
+HELPER_SCRIPT_YOLOX="${TAP_HOME}/activate_yolox.sh"
+REPO_DIR="${TAP_CODE}/TemporalAttentionPlayground"
+SETUP_CODE_DIR="${REPO_DIR}/code/setup"
 OPS_DIR="$REPO_DIR/TransVOD_plusplus/models/ops"
-DATASETS_ROOT="$HOME/datasets"
+DATASETS_ROOT="${TAP_DATASETS}/datasets"
 VISDRONE_ROOT="$DATASETS_ROOT/visdrone"
+VISDRONE_YOLOV="$VISDRONE_ROOT/yolov"
 VISDRONE_TRANSVOD="$VISDRONE_ROOT/transvod"
 
 # Provide your Pro account credentials via env vars (or export before running)
@@ -46,7 +49,7 @@ MEGA_EMAIL="e12217036@student.tuwien.ac.at"                  # e.g., export MEGA
 MEGA_PASS="Spam_pass30"                      # e.g., export MEGA_PASS="your_password"
 
 # ===== State / idempotency ===================================================
-STATE_DIR="${HOME}/.tap_setup_state"
+STATE_DIR="${TAP_HOME}/.tap_setup_state"
 mkdir -p "${STATE_DIR}"
 
 marker() { printf "%s/%s.done" "$STATE_DIR" "$1"; }
@@ -99,9 +102,9 @@ export ADDR2LINE="$(command -v addr2line || true)"
 export NM="$(command -v nm || true)"
 export STRINGS="$(command -v strings || true)"
 # conda sh hook
-if [ -f "$HOME/miniconda3/etc/profile.d/conda.sh" ]; then
+if [ -f "$TAP_HOME/miniconda3/etc/profile.d/conda.sh" ]; then
   # shellcheck disable=SC1091
-  source "$HOME/miniconda3/etc/profile.d/conda.sh"
+  source "$TAP_HOME/miniconda3/etc/profile.d/conda.sh"
   conda activate msda 2>/dev/null || true
 fi
 set -u
@@ -120,9 +123,9 @@ write_yolox_helper() {
 set -e
 # temporarily relax nounset inside helper since conda hooks expect unset vars
 set +u
-if [ -f "$HOME/miniconda3/etc/profile.d/conda.sh" ]; then
+if [ -f "$TAP_HOME/miniconda3/etc/profile.d/conda.sh" ]; then
   # shellcheck disable=SC1091
-  source "$HOME/miniconda3/etc/profile.d/conda.sh"
+  source "$TAP_HOME/miniconda3/etc/profile.d/conda.sh"
   conda activate yolox 2>/dev/null || true
 fi
 set -u
@@ -377,18 +380,18 @@ run_visdrone_tools() {
   if [ -d "${VISDRONE_ROOT}/VisDrone2019-VID-train" ] && [ -d "${VISDRONE_ROOT}/VisDrone2019-VID-val" ]; then
     warn "VisDrone train/val already present; skipping download"
   else
-    python3 "${REPO_DIR}/downloadVisdrone.py" --root "${VISDRONE_ROOT}" || warn "downloadVisdrone.py failed"
+    python3 "${SETUP_CODE_DIR}/visdrone_download.py" --root "${VISDRONE_ROOT}" || warn "visdrone_download failed"
   fi
 
-  if [ -d "${VISDRONE_TRANSVOD}/ILSVRC2015" ]; then
-    warn "Converted VisDrone (TransVOD format) already present; skipping conversion"
-  else
-    python3 "${REPO_DIR}/code/testVisdroneToImageNetVid.py" \
-      --visdrone-train "${VISDRONE_ROOT}/VisDrone2019-VID-train" \
-      --visdrone-val   "${VISDRONE_ROOT}/VisDrone2019-VID-val" \
-      --out-root       "${VISDRONE_TRANSVOD}" \
-      --link-mode      hardlink || warn "testVisdroneToImageNetVid.py failed"
-  fi
+  # if [ -d "${VISDRONE_TRANSVOD}" ]; then
+  #   warn "Converted VisDrone (TransVOD format) already present; skipping conversion"
+  # else
+  #   python3 "${SETUP_CODE_DIR}/testVisdroneToImageNetVid.py" \
+  #     --visdrone-train "${VISDRONE_ROOT}/VisDrone2019-VID-train" \
+  #     --visdrone-val   "${VISDRONE_ROOT}/VisDrone2019-VID-val" \
+  #     --out-root       "${VISDRONE_TRANSVOD}" \
+  #     --link-mode      hardlink || warn "testVisdroneToImageNetVid.py failed"
+  # fi
 
   mark_done "$step"
 }
@@ -610,7 +613,7 @@ install_megacmd() {
   VERSION_ID="$(. /etc/os-release && echo "${VERSION_ID:-}" | sed 's/"//g')"
 
   # --- Where the .deb lives (override with MEGACMD_DEB_FILE / MEGACMD_DEB_DIR if you want) ---
-  local DEB_DIR="${MEGACMD_DEB_DIR:-$HOME/TemporalAttentionPlayground}"
+  local DEB_DIR="${MEGACMD_DEB_DIR:-${REPO_DIR}/setup/deps}"
   local DEB_FILE="${MEGACMD_DEB_FILE:-}"
 
   # Map codename -> expected .deb name (MEGA’s naming scheme)
@@ -732,10 +735,7 @@ download_datasets_mega() {
   fi
 
   # Allow override of destination
-  local target_root="${VISDRONE_MEGA_ROOT:-$VISDRONE_ROOT}"
-  if [ -z "$target_root" ]; then
-    target_root="$HOME/datasets/visdrone"
-  fi
+  local target_root="${VISDRONE_ROOT:-$TAP_HOME/datasets/visdrone}"
   export target_root
 
   python - <<'PYCODE'
@@ -826,16 +826,17 @@ convert_visdrone_to_imagenetvid() {
 
   section "Converting VisDrone to Transvod format"
 
-  local train_dir="$HOME/datasets/visdrone/VisDrone2019-VID-train"
-  local val_dir="$HOME/datasets/visdrone/VisDrone2019-VID-val"
-  local out_dir="$HOME/datasets/visdrone/transvod"
+  local train_dir="$VISDRONE_ROOT/VisDrone2019-VID-train"
+  local val_dir="$VISDRONE_ROOT/VisDrone2019-VID-val"
+  local out_dir="$VISDRONE_TRANSVOD"
+  printf 'train_dir="%s"\n' "$train_dir"
   pip install pillow  # Ensure PIL is present for the converter
   # Support alternate naming in case someone used datasets-visdrone
-  if [ ! -d "$train_dir" ] && [ -d "$HOME/datasets-visdrone/VisDrone2019-VID-train" ]; then
-    train_dir="$HOME/datasets-visdrone/VisDrone2019-VID-train"
+  if [ ! -d "$train_dir" ] && [ -d "$TAP_HOME/datasets-visdrone/VisDrone2019-VID-train" ]; then
+    train_dir="$TAP_HOME/datasets-visdrone/VisDrone2019-VID-train"
   fi
-  if [ ! -d "$val_dir" ] && [ -d "$HOME/datasets-visdrone/VisDrone2019-VID-val" ]; then
-    val_dir="$HOME/datasets-visdrone/VisDrone2019-VID-val"
+  if [ ! -d "$val_dir" ] && [ -d "$TAP_HOME/datasets-visdrone/VisDrone2019-VID-val" ]; then
+    val_dir="$TAP_HOME/datasets-visdrone/VisDrone2019-VID-val"
   fi
 
   if [ ! -d "$train_dir" ] || [ ! -d "$val_dir" ]; then
@@ -846,14 +847,14 @@ convert_visdrone_to_imagenetvid() {
   mkdir -p "$out_dir"
 
   # Run the converter script
-  if [ -f "$REPO_DIR/code/transvodVisdroneBuilder.py" ]; then
-    python3 "$REPO_DIR/code/transvodVisdroneBuilder.py" \
+  if [ -f "$SETUP_CODE_DIR/visdrone_transvod_builder.py" ]; then
+    python3 "$SETUP_CODE_DIR/visdrone_transvod_builder.py" \
       --visdrone-train "$train_dir" \
       --visdrone-val "$val_dir" \
       --out-root "$out_dir" \
       --link-mode hardlink
   else
-    err "Converter not found: $REPO_DIR/code/transvodVisdroneBuilder.py"
+    err "Converter not found: $SETUP_CODE_DIR/visdrone_transvod_builder.py"
     return 1
   fi
 
@@ -872,16 +873,16 @@ convert_visdrone_to_yolov() {
 
   section "Converting VisDrone to YoloV format"
 
-  local train_dir="$HOME/datasets/visdrone/VisDrone2019-VID-train"
-  local val_dir="$HOME/datasets/visdrone/VisDrone2019-VID-val"
-  local out_dir="$HOME/datasets/visdrone/yolov"
+  local train_dir="$VISDRONE_ROOT/VisDrone2019-VID-train"
+  local val_dir="$VISDRONE_ROOT/VisDrone2019-VID-val"
+  local out_dir="$VISDRONE_YOLOV"
   pip install pillow  # Ensure PIL is present for the converter
   # Support alternate naming in case someone used datasets-visdrone
-  if [ ! -d "$train_dir" ] && [ -d "$HOME/datasets-visdrone/VisDrone2019-VID-train" ]; then
-    train_dir="$HOME/datasets-visdrone/VisDrone2019-VID-train"
+  if [ ! -d "$train_dir" ] && [ -d "$TAP_HOME/datasets-visdrone/VisDrone2019-VID-train" ]; then
+    train_dir="$TAP_HOME/datasets-visdrone/VisDrone2019-VID-train"
   fi
-  if [ ! -d "$val_dir" ] && [ -d "$HOME/datasets-visdrone/VisDrone2019-VID-val" ]; then
-    val_dir="$HOME/datasets-visdrone/VisDrone2019-VID-val"
+  if [ ! -d "$val_dir" ] && [ -d "$TAP_HOME/datasets-visdrone/VisDrone2019-VID-val" ]; then
+    val_dir="$TAP_HOME/datasets-visdrone/VisDrone2019-VID-val"
   fi
 
   if [ ! -d "$train_dir" ] || [ ! -d "$val_dir" ]; then
@@ -892,14 +893,14 @@ convert_visdrone_to_yolov() {
   mkdir -p "$out_dir"
 
   # Run the converter script
-  if [ -f "$REPO_DIR/code/yolovVisdroneBuilder.py" ]; then
-    python3 "$REPO_DIR/code/yolovVisdroneBuilder.py" \
+  if [ -f "$SETUP_CODE_DIR/visdrone_yolov_builder.py" ]; then
+    python3 "$SETUP_CODE_DIR/visdrone_yolov_builder.py" \
       --visdrone-train "$train_dir" \
       --visdrone-val "$val_dir" \
       --out-root "$out_dir" \
       --link-mode hardlink
   else
-    err "Converter not found: $REPO_DIR/code/yolovVisdroneBuilder.py"
+    err "Converter not found: $SETUP_CODE_DIR/visdrone_yolov_builder.py"
     return 1
   fi
 
@@ -917,30 +918,30 @@ convert_visdrone_to_yolov() {
 
   section "Creating YOLOX annotations for VisDrone dataset"
 
-  local yolov_dir="$HOME/datasets/visdrone/yolov/annotations"
+  local yolov_dir="$VISDRONE_YOLOV/annotations"
   if [ ! -d "$yolov_dir" ]; then
     err "Missing YoloV dataset directory. Convert VisDrone to YoloV format first."
     return 1
   fi
 
-  if [ -f "${HELPER_SCRIPT_YOLOX:-$HOME/activate_yolox.sh}" ]; then
+  if [ -f "${HELPER_SCRIPT_YOLOX:-$TAP_HOME/activate_yolox.sh}" ]; then
     # Activate YOLOX environment (sourcing makes conda activate available)
     # shellcheck disable=SC1091
-    source "${HELPER_SCRIPT_YOLOX:-$HOME/activate_yolox.sh}"
-  elif [ -f /root/activate_yolox.sh ]; then
+    source "${HELPER_SCRIPT_YOLOX:-$TAP_HOME/activate_yolox.sh}"
+  elif [ -f $TAP_HOME/activate_yolox.sh ]; then
     # In case script runs as root and helper is placed in /root
-    source /root/activate_yolox.sh
+    source $TAP_HOME/activate_yolox.sh
   else
-    err "Missing activate_yolox helper. Expected at ${HELPER_SCRIPT_YOLOX:-$HOME/activate_yolox.sh} or /root/activate_yolox.sh"
+    err "Missing activate_yolox helper. Expected at ${HELPER_SCRIPT_YOLOX:-$TAP_HOME/activate_yolox.sh} or /root/activate_yolox.sh"
     return 1
   fi
 
 
   # Run the annotation creation script
-  if [ -f "$REPO_DIR/code/yoloxVisdroneBuilder.py" ]; then
-    python3 "$REPO_DIR/code/yoloxVisdroneBuilder.py"
+  if [ -f "$SETUP_CODE_DIR/visdrone_yolox_builder.py" ]; then
+    python3 "$SETUP_CODE_DIR/visdrone_yolox_builder.py"
   else
-    err "Annotation creation script not found: $REPO_DIR/code/yoloxVisdroneBuilder.py"
+    err "Annotation creation script not found: $SETUP_CODE_DIR/visdrone_yolox_builder.py"
     return 1
   fi
 
@@ -951,34 +952,6 @@ convert_visdrone_to_yolov() {
   mark_done "$step"
  }
 
- download_yolov_weights() {
-  [ "${DOWNLOAD_YOLOV_WEIGHTS}" -eq 1 ] || { warn "Skipping YOLOV weights download"; return 0; }
-  local step="download_yolov_weights"
-  if already_done "$step"; then
-    warn "YOLOV weights already downloaded; skipping"
-    return 0
-  fi
-
-  section "Downloading YOLOV pretrained weights"
-
-  local weights_dir="$HOME/weights/yolov"
-  local swinb_checkpoint_url="https://mega.nz/file/liBxwDwS#OIE_VxM7i2TvfxeC93C-Ptyh9VwshuGOlTe0v5vtdig"
-  local v_swinBase="https://mega.nz/file/Iyx1xYLC#ByppxgdCtkhZGzssrciC74QtvlEheXCtqGUHylgm3lg"
-
-  mkdir -p "$weights_dir"
-
-  # Run the weights download script
-  if [ -f "$REPO_DIR/code/mega-downloader.py" ]; then
-    python3 "$REPO_DIR/code/mega-downloader.py" "$swinb_checkpoint_url" "$weights_dir"/swinb_checkpoint.pth
-    python3 "$REPO_DIR/code/mega-downloader.py" "$v_swinBase" "$weights_dir"/v_swinBase.pth
-  else
-    err "Weights download script not found: $REPO_DIR/code/mega-downloader.py"
-    return 1
-  fi
-
-  ok "YOLOV weights downloaded → $weights_dir"
-  mark_done "$step"
-}
 
 create_visdrone_coco_annotations() {
   [ "${CREATE_VISDRONE_COCO_ANNOTS}" -eq 1 ] || { warn "Skipping COCO annotation creation"; return 0; }
@@ -990,7 +963,7 @@ create_visdrone_coco_annotations() {
 
   section "Creating COCO annotations for VisDrone dataset"
 
-  local visdrone_dir="$HOME/datasets/visdrone/yolov"
+  local visdrone_dir="$VISDRONE_YOLOV"
   if [ ! -d "$visdrone_dir" ]; then
     err "Missing VisDrone dataset directory. Download VisDrone first."
     return 1
@@ -1006,6 +979,36 @@ create_visdrone_coco_annotations() {
   fi
 
   ok "COCO annotation creation completed → $visdrone_dir/annotations"
+  mark_done "$step"
+}
+
+
+ download_yolov_weights() {
+  [ "${DOWNLOAD_YOLOV_WEIGHTS}" -eq 1 ] || { warn "Skipping YOLOV weights download"; return 0; }
+  local step="download_yolov_weights"
+  if already_done "$step"; then
+    warn "YOLOV weights already downloaded; skipping"
+    return 0
+  fi
+
+  section "Downloading YOLOV pretrained weights"
+
+  local weights_dir="$TAP_HOME/weights/yolov"
+  local swinb_checkpoint_url="https://mega.nz/file/liBxwDwS#OIE_VxM7i2TvfxeC93C-Ptyh9VwshuGOlTe0v5vtdig"
+  local v_swinBase="https://mega.nz/file/Iyx1xYLC#ByppxgdCtkhZGzssrciC74QtvlEheXCtqGUHylgm3lg"
+
+  mkdir -p "$weights_dir"
+
+  # Run the weights download script
+  if [ -f "$REPO_DIR/code/mega_downloader.py" ]; then
+    python3 "$REPO_DIR/code/mega_downloader.py" "$swinb_checkpoint_url" "$weights_dir"/swinb_checkpoint.pth
+    python3 "$REPO_DIR/code/mega_downloader.py" "$v_swinBase" "$weights_dir"/v_swinBase.pth
+  else
+    err "Weights download script not found: $REPO_DIR/code/mega_downloader.py"
+    return 1
+  fi
+
+  ok "YOLOV weights downloaded → $weights_dir"
   mark_done "$step"
 }
 
@@ -1048,7 +1051,7 @@ download_yolox_coco_weights() {
 
   section "Downloading YOLOX COCO pretrained weights"
 
-  local weights_dir="$HOME/weights/yolox_coco"
+  local weights_dir="$TAP_HOME/weights/yolox_coco"
   local yolox_dir="$REPO_DIR/YOLOV/pretrained"
   mkdir -p "$weights_dir"
   mkdir -p "$yolox_dir"
@@ -1079,27 +1082,27 @@ download_yolox_coco_weights() {
 # ===== Main ==================================================================
 main() {
   section "Starting setup (idempotent). To force redo, run with FORCE_RUN=1"
-  cloneRepo
-  write_msda_helper
-  install_apt_prereqs
-  install_cuda_113
-  setup_miniconda
-  conda_shell_hook
-  setup_env_msda
-  build_transvod_ops
+  #cloneRepo
+  #write_msda_helper
+  #install_apt_prereqs
+  #install_cuda_113
+  #setup_miniconda
+  #conda_shell_hook
+  #setup_env_msda
+  #build_transvod_ops
   #run_visdrone_tools
-  setup_env_yolox
+  #setup_env_yolox
   #download_datasets_ftp
-  install_megacmd
-  mega_login
-  download_datasets_mega
+  #install_megacmd
+  #mega_login
+  #download_datasets_mega
   convert_visdrone_to_imagenetvid
   convert_visdrone_to_yolov
   create_yolox_annotations
   download_yolov_weights
   create_visdrone_coco_annotations
-  download_swin_weights
-  download_yolox_coco_weights
+  #download_swin_weights
+  #download_yolox_coco_weights
   ok "Setup complete"
   echo "Tip: activate with 'source ${HELPER_SCRIPT_MSDA}' or 'source ${HELPER_SCRIPT_YOLOX}'"
 }
