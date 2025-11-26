@@ -1,15 +1,7 @@
-[submodule "rf-detr"]
-	path = rf-detr
-	url = https://github.com/mozi30/rf-detr.git
 [submodule "TransVOD_plusplus"]
 	path = TransVOD_plusplus
 	url = https://github.com/mozi30/TransVOD_plusplus.git
-[submodule "YOLOMG"]
-	path = YOLOMG
-	url = https://github.com/mozi30/YOLOMG.git
 [submodule "YOLOV"]
 	path = YOLOV
 	url = https://github.com/mozi30/YOLOV.git
-[submodule "ultralytics"]
-	path = ultralytics
-	url = https://github.com/mozi30/ultralytics.git
+
