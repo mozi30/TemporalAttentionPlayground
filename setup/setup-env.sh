@@ -8,6 +8,7 @@
 set -Eeuo pipefail
 
 # ===== Config toggles (edit as needed) =======================================
+EXPORT_ENV_VARS=${EXPORT_ENV_VARS:-1}  # 1 to export TAP_* vars to /etc/profile.d/tap_env.sh
 INSTALL_APT=${INSTALL_APT:-1}                # 1 to install OS deps with apt-get
 INSTALL_CUDA=${INSTALL_CUDA:-1}              # 1 to install CUDA 11.3 toolkit runfile
 SETUP_MINICONDA=${SETUP_MINICONDA:-1}        # 1 to install/initialize Miniconda
@@ -36,13 +37,14 @@ CUDA_RUNFILE="cuda_11.3.0_465.19.01_linux.run"
 CUDA_URL="https://developer.download.nvidia.com/compute/cuda/11.3.0/local_installers/${CUDA_RUNFILE}"
 HELPER_SCRIPT_MSDA="${TAP_HOME}/activate_msda.sh"
 HELPER_SCRIPT_YOLOX="${TAP_HOME}/activate_yolox.sh"
-REPO_DIR="${TAP_CODE}/TemporalAttentionPlayground"
+REPO_DIR="${TAP_REPO}"
 SETUP_CODE_DIR="${REPO_DIR}/code/setup"
 OPS_DIR="$REPO_DIR/TransVOD_plusplus/models/ops"
-DATASETS_ROOT="${TAP_DATASETS}/datasets"
+DATASETS_ROOT="${TAP_DATASETS}"
 VISDRONE_ROOT="$DATASETS_ROOT/visdrone"
 VISDRONE_YOLOV="$VISDRONE_ROOT/yolov"
 VISDRONE_TRANSVOD="$VISDRONE_ROOT/transvod"
+
 
 # Provide your Pro account credentials via env vars (or export before running)
 MEGA_EMAIL="e12217036@student.tuwien.ac.at"                  # e.g., export MEGA_EMAIL="you@example.com"
@@ -66,9 +68,58 @@ ok()      { printf "\033[1;32m✅ %s\033[0m\n" "$*"; }
 warn()    { printf "\033[1;33m⚠️  %s\033[0m\n" "$*"; }
 err()     { printf "\033[1;31m❌ %s\033[0m\n" "$*"; }
 trap 'err "Error on line $LINENO: $BASH_COMMAND"' ERR
+#====== Export TAP VARIABLES =================================================
+set_tap_env() {
+    [ "${EXPORT_ENV_VARS}" -ge 0 ] >/dev/null 2>&1 || true  # silence shellcheck re: unused toggles
+    local step="export_tap_env"
+    if already_done "$step"; then warn "Repo step already done; skipping"; return 0; fi
+    local TARGET_FILE="/etc/profile.d/tap_env.sh"
+    local TEMP_FILE="/tmp/tap_env.sh"
+
+  # New desired content (dynamic: references TAP_HOME at source time, with a reasonable default)
+  # We intentionally write escaped-dollar forms (e.g. \${TAP_HOME}) so the resulting
+  # /etc/profile.d/tap_env.sh evaluates TAP_HOME and related vars when sourced, not
+  # when this script runs. This avoids hard-coded "/home/mozi" while still providing
+  # a default if TAP_HOME is not set in the target shell.
+  cat > "$TEMP_FILE" << EOF
+#!/bin/sh
+export TAP_HOME="\${TAP_HOME:-/home/mozi}"
+export TAP_DATASETS="\${TAP_HOME}/datasets"
+export TAP_MODELS="\${TAP_HOME}/models"
+export TAP_WEIGHTS="\${TAP_HOME}/weights"
+export TAP_OUTPUTS="\${TAP_HOME}/outputs"
+export TAP_REPO="\${TAP_HOME}/TemporalAttentionPlayground"
+EOF
+
+    # Check if the file already exists
+    if [ -f "$TARGET_FILE" ]; then
+        echo "⚠️  $TARGET_FILE already exists."
+
+        # Compare with existing content
+        if sudo cmp -s "$TEMP_FILE" "$TARGET_FILE"; then
+            echo "✔️  No changes needed — environment variables are already up to date."
+            rm "$TEMP_FILE"
+            return 0
+        else
+            echo "🔄 File exists but content differs. Updating..."
+        fi
+    else
+        echo "📄 No existing file found — creating new environment config."
+    fi
+
+    # Move file and set permissions
+    sudo mv "$TEMP_FILE" "$TARGET_FILE"
+    sudo chmod +x "$TARGET_FILE"
+
+    echo "✅ Environment variables updated at $TARGET_FILE"
+    echo "🔁 Run: source /etc/profile  (or log out and back in)"
+    mark_done "$step"
+}
+
+
 
 # ===== Clone or update repo ==================================================
-cloneRepo() {
+clone_repo() {
   [ "${INSTALL_APT}" -ge 0 ] >/dev/null 2>&1 || true  # silence shellcheck re: unused toggles
   local step="clone_repo"
   if already_done "$step"; then warn "Repo step already done; skipping"; return 0; fi
@@ -993,18 +1044,18 @@ create_visdrone_coco_annotations() {
 
   section "Downloading YOLOV pretrained weights"
 
-  local weights_dir="$TAP_HOME/weights/yolov"
+  local weights_dir="$TAP_WEIGHTS/yolov"
   local swinb_checkpoint_url="https://mega.nz/file/liBxwDwS#OIE_VxM7i2TvfxeC93C-Ptyh9VwshuGOlTe0v5vtdig"
   local v_swinBase="https://mega.nz/file/Iyx1xYLC#ByppxgdCtkhZGzssrciC74QtvlEheXCtqGUHylgm3lg"
 
   mkdir -p "$weights_dir"
 
   # Run the weights download script
-  if [ -f "$REPO_DIR/code/mega_downloader.py" ]; then
-    python3 "$REPO_DIR/code/mega_downloader.py" "$swinb_checkpoint_url" "$weights_dir"/swinb_checkpoint.pth
-    python3 "$REPO_DIR/code/mega_downloader.py" "$v_swinBase" "$weights_dir"/v_swinBase.pth
+  if [ -f "$SETUP_CODE_DIR mega_downloader.py" ]; then
+    python3 "$SETUP_CODE_DIR/mega_downloader.py" "$swinb_checkpoint_url" "$weights_dir"/swinb_checkpoint.pth
+    python3 "$SETUP_CODE_DIR/mega_downloader.py" "$v_swinBase" "$weights_dir"/v_swinBase.pth
   else
-    err "Weights download script not found: $REPO_DIR/code/mega_downloader.py"
+    err "Weights download script not found: $SETUP_CODE_DIR/mega_downloader.py"
     return 1
   fi
 
@@ -1023,7 +1074,7 @@ download_swin_weights() {
 
   section "Downloading Swin Transformer pretrained weights"
 
-  local weights_dir="$REPO_DIR/YOLOV/pretrained"
+  local weights_dir="$TAP_WEIGHTS/swin"
   mkdir -p "$weights_dir"
 
   local swin_base_url="https://github.com/SwinTransformer/storage/releases/download/v1.0.0/swin_base_patch4_window7_224_22k.pth"
@@ -1051,7 +1102,7 @@ download_yolox_coco_weights() {
 
   section "Downloading YOLOX COCO pretrained weights"
 
-  local weights_dir="$TAP_HOME/weights/yolox_coco"
+  local weights_dir="$TAP_WEIGHTS/yolox_coco"
   local yolox_dir="$REPO_DIR/YOLOV/pretrained"
   mkdir -p "$weights_dir"
   mkdir -p "$yolox_dir"
@@ -1082,27 +1133,28 @@ download_yolox_coco_weights() {
 # ===== Main ==================================================================
 main() {
   section "Starting setup (idempotent). To force redo, run with FORCE_RUN=1"
-  #cloneRepo
-  #write_msda_helper
-  #install_apt_prereqs
-  #install_cuda_113
-  #setup_miniconda
-  #conda_shell_hook
-  #setup_env_msda
-  #build_transvod_ops
-  #run_visdrone_tools
-  #setup_env_yolox
+  set_tap_env
+  clone_repo
+  write_msda_helper
+  install_apt_prereqs
+  install_cuda_113
+  setup_miniconda
+  conda_shell_hook
+  setup_env_msda
+  build_transvod_ops
+  run_visdrone_tools
+  setup_env_yolox
   #download_datasets_ftp
-  #install_megacmd
-  #mega_login
-  #download_datasets_mega
+  install_megacmd
+  mega_login
+  download_datasets_mega
   convert_visdrone_to_imagenetvid
   convert_visdrone_to_yolov
   create_yolox_annotations
   download_yolov_weights
   create_visdrone_coco_annotations
-  #download_swin_weights
-  #download_yolox_coco_weights
+  download_swin_weights
+  download_yolox_coco_weights
   ok "Setup complete"
   echo "Tip: activate with 'source ${HELPER_SCRIPT_MSDA}' or 'source ${HELPER_SCRIPT_YOLOX}'"
 }
