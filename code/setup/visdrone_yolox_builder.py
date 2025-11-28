@@ -6,12 +6,16 @@ package path.
 """
 from pathlib import Path
 import sys
-
+import importlib.util
 # Add project root so the `YOLOV` package can be imported. Adjust if your layout differs.
-ROOT = Path(__file__).resolve().parents[1]  # /root/TemporalAttentionPlayground
-sys.path.insert(0, str(ROOT))
 
-from YOLOV.yolox.data.datasets.ovis import convert_ovis_coco
+ROOT = Path(__file__).resolve().parents[2]  # /root/TemporalAttentionPlayground
+sys.path.insert(0, str(ROOT))
+ovis_path = ROOT / "YOLOV" / "yolox" / "data" / "datasets" / "ovis.py"
+spec = importlib.util.spec_from_file_location("ovis_module", str(ovis_path))
+ovis = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(ovis)
+convert_ovis_coco = ovis.convert_ovis_coco
 
 def build_visdrone_ovis(visdrone_root: Path):
     """Convert VisDrone dataset to OVIS COCO format using YOLOX's convert_ovis_coco.

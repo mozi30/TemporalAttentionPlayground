@@ -1134,7 +1134,7 @@ download_yolox_coco_weights() {
 main() {
   section "Starting setup (idempotent). To force redo, run with FORCE_RUN=1"
   set_tap_env
-  clone_repo
+  #clone_repo
   write_msda_helper
   install_apt_prereqs
   install_cuda_113
@@ -1151,10 +1151,10 @@ main() {
   convert_visdrone_to_imagenetvid
   convert_visdrone_to_yolov
   create_yolox_annotations
-  download_yolov_weights
+ # download_yolov_weights
   create_visdrone_coco_annotations
-  download_swin_weights
-  download_yolox_coco_weights
+ #download_swin_weights
+ # download_yolox_coco_weights
   ok "Setup complete"
   echo "Tip: activate with 'source ${HELPER_SCRIPT_MSDA}' or 'source ${HELPER_SCRIPT_YOLOX}'"
 }
